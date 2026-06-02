@@ -19,6 +19,29 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from matplotlib.ticker import FuncFormatter
+
+
+###############################################################################
+# Se describen los colores que integran la paleta institucional para mis gráficos
+###############################################################################
+
+#1. Celeste claro
+#HEX: #5FB7C6
+#Nombre descriptivo: Celeste muy claro
+#Uso: fondos, áreas suaves, mapas base
+
+#2. Verde olivo
+#HEX: #A3AD2C
+#Nombre descriptivo: Verde olivo institucional
+#Uso: color principal de datos (barras, líneas)
+
+#3. Azul petróleo
+#HEX: #0B4F6C
+#Nombre descriptivo: Azul petróleo
+#Uso: énfasis, títulos, bordes
+
+
+
 # Se carga el archivo en formato xlsx denominado 0_BGB_2013_2025, el cual
 # contiene información de los becarios, y se almacena en un objeto dataframe
 
@@ -67,13 +90,228 @@ pronabec_no = pronabec[pronabec["CONDICION_FINAL"]=="NO SE LE ADJUDICÓ LA BECA"
 # Se cuentan los identificadores de postulaciones únicas considerando el dataframe pronabec_no
 pronabec_no["ID_POSTULACION"].nunique()
 
+###############################################################################
+# Se realiza un análisis de los postulantes a la Beca Generación del Bicentenario
+# El análisis considera a los postulantes que tienen código de postulación
+###############################################################################
+
+# Se eliminan los valores nan del dataframe pronabec
+postulante = pronabec.dropna(subset=["ID_POSTULACION"])
+
+# Se identifican las categorias del campo nivel educativo
+postulante.NIVEL_EDUCATIVO.value_counts()
+postulante = postulante[postulante["NIVEL_EDUCATIVO"]!="NO CODIFICADA"]
+
+# Se identifica si existen valores duplicados en el dataframe postulante
+postulante["ID_POSTULACION"].nunique()
+
+# Se calcula la distribución de postulantes por año
+postulante_año = pd.pivot_table(postulante, values="ID_POSTULACION", index="AÑO_CONVOCATORIA", aggfunc="count")
+postulante_año.reset_index(inplace=True)
+
+# Se transforman campos del dataframe pronabec_becario_año
+postulante_año["AÑO_CONVOCATORIA"] = pd.to_numeric(postulante_año["AÑO_CONVOCATORIA"], errors="coerce")
+postulante_año["ID_POSTULACION"] = pd.to_numeric(postulante_año["ID_POSTULACION"], errors="coerce")
+
+# Se renombran atributos del dataframe pronabec_becario_año
+postulante_año.rename(columns=({"ID_POSTULACION":"CANTIDAD"}), inplace=True)
+
+# Se organiza en función de año
+postulante_año = postulante_año.sort_values("AÑO_CONVOCATORIA")
+
+fig, ax = plt.subplots(figsize=(10, 6))
+
+barras = ax.bar(
+    postulante_año["AÑO_CONVOCATORIA"],
+    postulante_año["CANTIDAD"],
+    color="#0B4F6C",
+    edgecolor="white",
+    linewidth=1.5
+)
+
+# Etiquetas arriba de cada columna
+for barra in barras:
+    alto = barra.get_height()
+    ax.text(
+        barra.get_x() + barra.get_width() / 2,
+        alto,
+        f"{alto:,.0f}",
+        ha="center",
+        va="bottom",
+        fontsize=10,
+        #fontweight="bold",
+        color="black"
+    )
+
+# Mostrar todos los años
+ax.set_xticks(postulante_año["AÑO_CONVOCATORIA"])
+ax.set_xticklabels(
+    postulante_año["AÑO_CONVOCATORIA"],
+    rotation=0
+)
+
+#ax.set_title(
+    #"Evolución del número total de postulantes, 2013-2025",
+    #fontsize=14,
+    #fontweight="bold"
+#)
+
+plt.xlabel("Año")
+plt.ylabel("Número de postulantes")
+
+
+ax.spines['top'].set_visible(False)
+ax.spines['right'].set_visible(False)
+
+plt.tight_layout()
+plt.show()
+
+###############################################################################
+# Se analiza los postulantes a programas de maestria
+###############################################################################
+postulante_maestria = postulante[postulante["NIVEL_EDUCATIVO"]=="MAESTRIA"]
+
+# Se calcula la distribución de postulantes por año
+postulante_maestria_año = pd.pivot_table(postulante_maestria, values="ID_POSTULACION", index="AÑO_CONVOCATORIA", aggfunc="count")
+postulante_maestria_año.reset_index(inplace=True)
+
+# Se transforman campos del dataframe pronabec_becario_año
+postulante_maestria_año["AÑO_CONVOCATORIA"] = pd.to_numeric(postulante_maestria_año["AÑO_CONVOCATORIA"], errors="coerce")
+postulante_maestria_año["ID_POSTULACION"] = pd.to_numeric(postulante_maestria_año["ID_POSTULACION"], errors="coerce")
+
+# Se renombran atributos del dataframe pronabec_becario_año
+postulante_maestria_año.rename(columns=({"ID_POSTULACION":"CANTIDAD"}), inplace=True)
+
+# Se organiza en función de año
+postulante_maestria_año = postulante_maestria_año.sort_values("AÑO_CONVOCATORIA")
+
+
+fig, ax = plt.subplots(figsize=(10, 6))
+
+# Línea
+ax.plot(
+    postulante_maestria_año["AÑO_CONVOCATORIA"],
+    postulante_maestria_año["CANTIDAD"],
+    color="red",
+    marker="o",
+    linewidth=2.5,
+    markersize=8
+)
+
+# Etiquetas
+for x, y in zip(postulante_maestria_año["AÑO_CONVOCATORIA"], postulante_maestria_año["CANTIDAD"]):
+    ax.annotate(
+        f"{y:,}",
+        (x, y),
+        textcoords="offset points",
+        xytext=(0, 8),
+        ha="center",
+        fontsize=10,
+        #fontweight="bold"
+    )
+
+# Formato
+#ax.set_title(
+    #"Número de becarios por año de convocatoria",
+    #fontsize=14,
+    #fontweight="bold"
+#)
+
+ax.set_xlabel("Año")
+ax.set_ylabel("Número de postulantes a programas de maestría")
+
+ax.set_xticks(postulante_maestria_año["AÑO_CONVOCATORIA"])
+
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+
+ax.grid(
+    axis="y",
+    linestyle="--",
+    alpha=0.3
+)
+
+plt.tight_layout()
+plt.show()
+
+
+###############################################################################
+# Se analiza los postulantes a programas de doctorado
+###############################################################################
+postulante_doctorado = postulante[postulante["NIVEL_EDUCATIVO"]=="DOCTORADO"]
+
+# Se calcula la distribución de postulantes por año
+postulante_doctorado_año = pd.pivot_table(postulante_doctorado, values="ID_POSTULACION", index="AÑO_CONVOCATORIA", aggfunc="count")
+postulante_doctorado_año.reset_index(inplace=True)
+
+# Se transforman campos del dataframe pronabec_becario_año
+postulante_doctorado_año["AÑO_CONVOCATORIA"] = pd.to_numeric(postulante_doctorado_año["AÑO_CONVOCATORIA"], errors="coerce")
+postulante_doctorado_año["ID_POSTULACION"] = pd.to_numeric(postulante_doctorado_año["ID_POSTULACION"], errors="coerce")
+
+# Se renombran atributos del dataframe pronabec_becario_año
+postulante_doctorado_año.rename(columns=({"ID_POSTULACION":"CANTIDAD"}), inplace=True)
+
+# Se organiza en función de año
+postulante_doctorado_año = postulante_doctorado_año.sort_values("AÑO_CONVOCATORIA")
+
+
+fig, ax = plt.subplots(figsize=(10, 6))
+
+# Línea
+ax.plot(
+    postulante_doctorado_año["AÑO_CONVOCATORIA"],
+    postulante_doctorado_año["CANTIDAD"],
+    color="purple",
+    marker="o",
+    linewidth=2.5,
+    markersize=8
+)
+
+# Etiquetas
+for x, y in zip(postulante_doctorado_año["AÑO_CONVOCATORIA"], postulante_doctorado_año["CANTIDAD"]):
+    ax.annotate(
+        f"{y:,}",
+        (x, y),
+        textcoords="offset points",
+        xytext=(0, 8),
+        ha="center",
+        fontsize=10,
+        #fontweight="bold"
+    )
+
+# Formato
+#ax.set_title(
+    #"Número de becarios por año de convocatoria",
+    #fontsize=14,
+    #fontweight="bold"
+#)
+
+ax.set_xlabel("Año")
+ax.set_ylabel("Número de postulantes a programas de doctorado")
+
+ax.set_xticks(postulante_maestria_año["AÑO_CONVOCATORIA"])
+
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+
+ax.grid(
+    axis="y",
+    linestyle="--",
+    alpha=0.3
+)
+
+plt.tight_layout()
+plt.show()
+
+
 # En total, durante el periodo de análisis, ¿cuántos postulantes recibieron la beca?
-pronabec_becario = pronabec[pronabec["CONDICION_FINAL"]=="SE LE ADJUDICÓ LA BECA"]
+pronabec_becario = postulante[postulante["CONDICION_FINAL"]=="SE LE ADJUDICÓ LA BECA"]
 a = pronabec_becario["ID_POSTULACION"].count()
 print(f"Los postulantes que recibieron la beca, durante el periodo de análisis, fueron {a}, lo que representa el 19%")
 
 # Se cuentan los identificadores de postulaciones únicas considerando el dataframe pronabec_becario
 pronabec_becario["ID_POSTULACION"].nunique()
+
 
 ###############################################################################
 # Caracteristicas generales
