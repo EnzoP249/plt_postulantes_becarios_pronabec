@@ -329,6 +329,7 @@ pronabec_becario.columns
 # Se analiza la distribución de postulantes por genero
 pronabec_becario.SEXO.value_counts(normalize=True).round(2)*100
 
+# Se calcula la edad promedio para la categoria género
 promedio_edad = pronabec_becario.groupby("SEXO")["EDADBASES"].mean()
 print(promedio_edad)
 
@@ -409,6 +410,15 @@ plt.show()
 # Se analiza los becarios de programas de maestria
 ###############################################################################
 becario_maestria = pronabec_becario[pronabec_becario["NIVEL_EDUCATIVO"]=="MAESTRIA"]
+becario_maestria.shape
+
+# Se analiza la distribución de becarios de programas de maestria por genero
+becario_maestria.SEXO.value_counts(normalize=True).round(2)*100
+
+# Se calcula la edad promedio para la categoria género
+promedio_edad = becario_maestria.groupby("SEXO")["EDADBASES"].mean()
+print(promedio_edad)
+
 
 # Se calcula la distribución de becarios de programas de maestria por año
 becario_maestria_año = pd.pivot_table(becario_maestria, values="ID_POSTULACION", index="AÑO_CONVOCATORIA", aggfunc="count")
@@ -478,6 +488,15 @@ plt.show()
 # Se analiza los becarios de programas de doctorado
 ###############################################################################
 becario_doctorado = pronabec_becario[pronabec_becario["NIVEL_EDUCATIVO"]=="DOCTORADO"]
+becario_doctorado.shape
+
+# Se analiza la distribución de becarios de programas de doctorado por genero
+becario_doctorado.SEXO.value_counts(normalize=True).round(2)*100
+
+# Se calcula la edad promedio para la categoria género
+promedio_edad = becario_doctorado.groupby("SEXO")["EDADBASES"].mean()
+print(promedio_edad)
+
 
 # Se calcula la distribución de becarios de programas de doctorado por año
 becario_doctorado_año = pd.pivot_table(becario_doctorado, values="ID_POSTULACION", index="AÑO_CONVOCATORIA", aggfunc="count")
@@ -948,17 +967,42 @@ plt.tight_layout()
 plt.show()
 
 ###############################################################################
-# Se analiza el cumplimiento del compomiso de servicio, de forma global, por
+# Se analiza el cumplimiento del compomiso de servicio (CSP), de forma global, por
 # maestria y doctorado
 ###############################################################################
 
-csp = pronabec_becario.ESTADO_DE_CSP.value_counts(normalize=True).round(2)*100
-csp = csp.to_frame()
-csp.reset_index(inplace=True)
-csp.rename(columns=({"proportion":"porcentaje"}), inplace=True)
-csp.columns
+# Tabla resumen
+csp = (
+    pronabec_becario["ESTADO_DE_CSP"]
+    .value_counts()
+    .reset_index()
+)
 
-labels = csp["ESTADO_DE_CSP"]
+csp.columns = ["ESTADO_DE_CSP", "cantidad"]
+
+# Porcentajes
+csp["porcentaje"] = (
+    csp["cantidad"] /
+    csp["cantidad"].sum() * 100
+).round(1)
+
+# Etiquetas amigables
+csp["estado_mostrar"] = csp["ESTADO_DE_CSP"].replace({
+    "CUMPLIO": "Cumplió",
+    "PENDIENTE": "Pendiente",
+    "SIN INFORMACIÓN": "Sin información",
+    "INCUMPLIMIENTO": "Incumplimiento"
+})
+
+# Etiquetas con frecuencia
+csp["label"] = (
+    csp["estado_mostrar"]
+    + "\n(n="
+    + csp["cantidad"].map("{:,}".format)
+    + ")"
+)
+
+labels = csp["label"]
 sizes = csp["porcentaje"]
 
 # Colores institucionales
@@ -969,14 +1013,18 @@ colors = [
     "#D9D9D9"   # Gris neutro
 ]
 
-# Crear figura
+# Mostrar porcentaje solo si es >= 1%
+def formato_pct(pct):
+    return f"{pct:.1f}%" if pct >= 1 else ""
+
+# Figura
 fig, ax = plt.subplots(figsize=(8, 6))
 
 wedges, texts, autotexts = ax.pie(
     sizes,
     labels=labels,
     colors=colors,
-    autopct="%1.0f%%",
+    autopct=formato_pct,
     startangle=90,
     counterclock=False,
     wedgeprops={
@@ -984,39 +1032,57 @@ wedges, texts, autotexts = ax.pie(
         "linewidth": 2
     },
     textprops={
-        "fontsize": 12,
+        "fontsize": 11,
         "fontweight": "bold"
     }
 )
 
-# Estilo de porcentajes
+# Estilo porcentajes
 for autotext in autotexts:
     autotext.set_color("white")
-    autotext.set_fontsize(13)
+    autotext.set_fontsize(12)
     autotext.set_fontweight("bold")
 
-# Título
-#ax.set_title(
-    #"Distribución de programas STEM y No STEM",
-    #fontsize=15,
-    #fontweight="bold",
-    #pad=20
-#)
-
-# Mantener círculo perfecto
 ax.axis("equal")
 
 plt.tight_layout()
 plt.show()
 
 
-csp = becario_maestria.ESTADO_DE_CSP.value_counts(normalize=True).round(2)*100
-csp = csp.to_frame()
-csp.reset_index(inplace=True)
-csp.rename(columns=({"proportion":"porcentaje"}), inplace=True)
-csp.columns
 
-labels = csp["ESTADO_DE_CSP"]
+
+# Tabla resumen
+csp = (
+    becario_maestria["ESTADO_DE_CSP"]
+    .value_counts()
+    .reset_index()
+)
+
+csp.columns = ["ESTADO_DE_CSP", "cantidad"]
+
+# Porcentajes
+csp["porcentaje"] = (
+    csp["cantidad"] /
+    csp["cantidad"].sum() * 100
+).round(1)
+
+# Etiquetas amigables
+csp["estado_mostrar"] = csp["ESTADO_DE_CSP"].replace({
+    "CUMPLIO": "Cumplió",
+    "PENDIENTE": "Pendiente",
+    "SIN INFORMACIÓN": "Sin información",
+    "INCUMPLIMIENTO": "Incumplimiento"
+})
+
+# Etiquetas con frecuencia
+csp["label"] = (
+    csp["estado_mostrar"]
+    + "\n(n="
+    + csp["cantidad"].map("{:,}".format)
+    + ")"
+)
+
+labels = csp["label"]
 sizes = csp["porcentaje"]
 
 # Colores institucionales
@@ -1027,14 +1093,18 @@ colors = [
     "#D9D9D9"   # Gris neutro
 ]
 
-# Crear figura
+# Mostrar porcentaje solo si es >= 1%
+def formato_pct(pct):
+    return f"{pct:.1f}%" if pct >= 1 else ""
+
+# Figura
 fig, ax = plt.subplots(figsize=(8, 6))
 
 wedges, texts, autotexts = ax.pie(
     sizes,
     labels=labels,
     colors=colors,
-    autopct="%1.0f%%",
+    autopct=formato_pct,
     startangle=90,
     counterclock=False,
     wedgeprops={
@@ -1042,57 +1112,93 @@ wedges, texts, autotexts = ax.pie(
         "linewidth": 2
     },
     textprops={
-        "fontsize": 12,
+        "fontsize": 11,
         "fontweight": "bold"
     }
 )
 
-# Estilo de porcentajes
+# Estilo porcentajes
 for autotext in autotexts:
     autotext.set_color("white")
-    autotext.set_fontsize(14)
+    autotext.set_fontsize(12)
     autotext.set_fontweight("bold")
 
-# Título
-#ax.set_title(
-    #"Distribución de programas STEM y No STEM",
-    #fontsize=15,
-    #fontweight="bold",
-    #pad=20
-#)
-
-# Mantener círculo perfecto
 ax.axis("equal")
 
 plt.tight_layout()
 plt.show()
 
 
-csp = becario_doctorado.ESTADO_DE_CSP.value_counts(normalize=True).round(2)*100
-csp = csp.to_frame()
-csp.reset_index(inplace=True)
-csp.rename(columns=({"proportion":"porcentaje"}), inplace=True)
-csp.columns
+# Para becarios de programas de doctorado
 
-labels = csp["ESTADO_DE_CSP"]
-sizes = csp["porcentaje"]
-
-# Colores institucionales
-colors = [
-    "#0B4F6C",  # Azul petróleo
-    "#5FB7C6",  # Celeste institucional
-    "#A3AD2C",  # Verde oliva
-    "#D9D9D9"   # Gris neutro
+# Orden fijo de categorías
+orden_estados = [
+    "CUMPLIO",
+    "PENDIENTE",
+    "SIN INFORMACIÓN",
+    "INCUMPLIMIENTO"
 ]
 
-# Crear figura
+# Colores fijos por estado
+colores_estado = {
+    "CUMPLIO": "#0B4F6C",
+    "PENDIENTE": "#5FB7C6",
+    "SIN INFORMACIÓN": "#A3AD2C",
+    "INCUMPLIMIENTO": "#D9D9D9"
+}
+
+# Etiquetas amigables
+etiquetas_estado = {
+    "CUMPLIO": "Cumplió",
+    "PENDIENTE": "Pendiente",
+    "SIN INFORMACIÓN": "Sin información",
+    "INCUMPLIMIENTO": "Incumplimiento"
+}
+
+# Tabla resumen
+csp = (
+    becario_doctorado["ESTADO_DE_CSP"]
+    .value_counts()
+    .reindex(orden_estados, fill_value=0)
+    .reset_index()
+)
+
+csp.columns = ["ESTADO_DE_CSP", "cantidad"]
+
+# Quitar estados con cero casos
+csp = csp[csp["cantidad"] > 0]
+
+# Porcentajes
+csp["porcentaje"] = (
+    csp["cantidad"] / csp["cantidad"].sum() * 100
+).round(1)
+
+# Etiqueta visible
+csp["estado_mostrar"] = csp["ESTADO_DE_CSP"].replace(etiquetas_estado)
+
+csp["label"] = (
+    csp["estado_mostrar"]
+    + "\n(n="
+    + csp["cantidad"].map("{:,}".format)
+    + ")"
+)
+
+labels = csp["label"]
+sizes = csp["porcentaje"]
+
+# Colores según estado, no según posición
+colors = csp["ESTADO_DE_CSP"].map(colores_estado)
+
+def formato_pct(pct):
+    return f"{pct:.1f}%" if pct >= 1 else ""
+
 fig, ax = plt.subplots(figsize=(8, 6))
 
 wedges, texts, autotexts = ax.pie(
     sizes,
     labels=labels,
     colors=colors,
-    autopct="%1.0f%%",
+    autopct=formato_pct,
     startangle=90,
     counterclock=False,
     wedgeprops={
@@ -1100,30 +1206,22 @@ wedges, texts, autotexts = ax.pie(
         "linewidth": 2
     },
     textprops={
-        "fontsize": 12,
+        "fontsize": 11,
         "fontweight": "bold"
     }
 )
 
-# Estilo de porcentajes
 for autotext in autotexts:
     autotext.set_color("white")
-    autotext.set_fontsize(14)
+    autotext.set_fontsize(12)
     autotext.set_fontweight("bold")
 
-# Título
-#ax.set_title(
-    #"Distribución de programas STEM y No STEM",
-    #fontsize=15,
-    #fontweight="bold",
-    #pad=20
-#)
-
-# Mantener círculo perfecto
 ax.axis("equal")
 
 plt.tight_layout()
 plt.show()
+
+
 
 ###############################################################################
 # Se analiza el estado de los becarios de maestria y doctorado del 2022 al 2025
