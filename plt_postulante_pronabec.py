@@ -24,6 +24,7 @@ from unidecode import unidecode
 import geopandas
 from shapely.geometry import Point, Polygon
 from matplotlib.colors import LinearSegmentedColormap
+import matplotlib.ticker as mticker
 
 ###############################################################################
 # Se describen los colores que integran la paleta institucional para mis gráficos
@@ -111,8 +112,275 @@ postulante["ID_POSTULACION"].nunique()
 # Se analiza la distribución de postulantes por genero
 postulante.SEXO.value_counts(normalize=True).round(2)*100
 
+###############################################################################
+# Se realiza un análisis de la edad de los postulantes
+###############################################################################
 promedio_edad = postulante.groupby("SEXO")["EDADBASES"].mean()
 print(promedio_edad)
+
+edad_resumen = (
+    postulante.groupby("AÑO_CONVOCATORIA")["EDADBASES"]
+      .agg(
+          EDAD_MINIMA="min",
+          EDAD_MEDIANA="median",
+          EDAD_MAXIMA="max"
+      )
+      .reset_index()
+)
+
+edad_resumen
+
+
+# ======================================
+# Gráfico
+# ======================================
+fig, ax = plt.subplots(figsize=(12, 6))
+
+# Bastones Min-Max
+ax.vlines(
+    edad_resumen["AÑO_CONVOCATORIA"],
+    edad_resumen["EDAD_MINIMA"],
+    edad_resumen["EDAD_MAXIMA"],
+    color="#BFBFBF",
+    linewidth=3,
+    zorder=1
+)
+
+# Puntos mínimos
+ax.scatter(
+    edad_resumen["AÑO_CONVOCATORIA"],
+    edad_resumen["EDAD_MINIMA"],
+    color="#A3AD2C",
+    s=60,
+    label="Edad mínima",
+    zorder=3
+)
+
+# Puntos medianos
+ax.scatter(
+    edad_resumen["AÑO_CONVOCATORIA"],
+    edad_resumen["EDAD_MEDIANA"],
+    color="#0B4F6C",
+    s=110,
+    label="Edad mediana",
+    zorder=4
+)
+
+# Puntos máximos
+ax.scatter(
+    edad_resumen["AÑO_CONVOCATORIA"],
+    edad_resumen["EDAD_MAXIMA"],
+    color="#C0392B",
+    s=60,
+    label="Edad máxima",
+    zorder=3
+)
+
+# ======================================
+# Etiquetas
+# ======================================
+for _, row in edad_resumen.iterrows():
+
+    # Edad mínima
+    ax.annotate(
+        f'{row["EDAD_MINIMA"]:.0f}',
+        (row["AÑO_CONVOCATORIA"], row["EDAD_MINIMA"]),
+        xytext=(-12, -8),
+        textcoords="offset points",
+        fontsize=8,
+        color="#A3AD2C",
+        fontweight="bold"
+    )
+
+    # Edad mediana
+    ax.annotate(
+        f'{row["EDAD_MEDIANA"]:.0f}',
+        (row["AÑO_CONVOCATORIA"], row["EDAD_MEDIANA"]),
+        xytext=(0, 8),
+        textcoords="offset points",
+        ha="center",
+        fontsize=10,
+        color="#0B4F6C",
+        fontweight="bold"
+    )
+
+    # Edad máxima
+    ax.annotate(
+        f'{row["EDAD_MAXIMA"]:.0f}',
+        (row["AÑO_CONVOCATORIA"], row["EDAD_MAXIMA"]),
+        xytext=(10, 6),
+        textcoords="offset points",
+        fontsize=8,
+        color="#C0392B",
+        fontweight="bold"
+    )
+
+# ======================================
+# Formato
+# ======================================
+ax.set_xlabel("Año")
+ax.set_ylabel("Edad (años)")
+
+# Mostrar todos los años
+ax.set_xticks(edad_resumen["AÑO_CONVOCATORIA"])
+ax.set_xticklabels(
+    edad_resumen["AÑO_CONVOCATORIA"],
+    rotation=0
+)
+
+# Espacio para etiquetas
+ax.set_ylim(
+    edad_resumen["EDAD_MINIMA"].min() - 2,
+    edad_resumen["EDAD_MAXIMA"].max() + 4
+)
+
+# Estética
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+
+ax.grid(
+    axis="y",
+    linestyle="--",
+    alpha=0.3
+)
+
+ax.legend(
+    frameon=False,
+    ncol=3,
+    loc="upper center",
+    bbox_to_anchor=(0.5, 1.08)
+)
+
+plt.tight_layout()
+plt.show()
+
+
+# Se obtiene un grafico juntos para el nivel educativo del postulante
+postulante_edu = pd.pivot_table(postulante, values="ID_POSTULACION", index="AÑO_CONVOCATORIA", columns="NIVEL_EDUCATIVO", aggfunc="count")
+postulante_edu.reset_index(inplace=True)
+
+# Se reemplazan algunas columnas con valor nan a 0
+postulante_edu["DOCTORADO"] = postulante_edu["DOCTORADO"].fillna(0)
+
+# Se calcula un campo que representa la suma entre los niveles educativos
+postulante_edu["TOTAL"] = postulante_edu["DOCTORADO"] + postulante_edu["MAESTRIA"]
+
+# Se convierte año convocatoria a una variable string
+postulante_edu["AÑO_CONVOCATORIA"] = postulante_edu["AÑO_CONVOCATORIA"].astype(str)
+
+
+x = range(len(postulante_edu))
+
+color_maestria = "#5FB7C6"
+color_doctorado = "#A3AD2C"
+color_total = "#0B4F6C"
+
+fig, ax = plt.subplots(figsize=(13, 6))
+
+# =====================
+# Barras apiladas
+# Maestría abajo, Doctorado arriba
+# =====================
+b_maestria = ax.bar(
+    x,
+    postulante_edu["MAESTRIA"],
+    color=color_maestria,
+    width=0.72,
+    label="Maestría"
+)
+
+b_doctorado = ax.bar(
+    x,
+    postulante_edu["DOCTORADO"],
+    bottom=postulante_edu["MAESTRIA"],
+    color=color_doctorado,
+    width=0.72,
+    label="Doctorado"
+)
+
+# =====================
+# Etiquetas Maestría
+# =====================
+for i, mae in enumerate(postulante_edu["MAESTRIA"]):
+    if mae >= 80:
+        ax.text(
+            i,
+            mae / 2,
+            f"{mae:,.0f}",
+            ha="center",
+            va="center",
+            fontsize=8,
+            fontweight="bold",
+            color="white"
+        )
+
+# =====================
+# Etiquetas Doctorado
+# Se colocan encima del segmento para que no se pierdan
+# =====================
+for i, (mae, doc) in enumerate(zip(postulante_edu["MAESTRIA"], postulante_edu["DOCTORADO"])):
+    if doc > 0:
+        ax.text(
+            i,
+            mae + doc + 18,
+            f"{doc:,.0f}",
+            ha="center",
+            va="bottom",
+            fontsize=8,
+            fontweight="bold",
+            color=color_doctorado
+        )
+
+# =====================
+# Etiquetas Total
+# =====================
+for i, total in enumerate(postulante_edu["TOTAL"]):
+    ax.text(
+        i,
+        total + max(postulante_edu["TOTAL"]) * 0.040,
+        f"{total:,.0f}",
+        ha="center",
+        va="bottom",
+        fontsize=9,
+        fontweight="bold",
+        color=color_total
+    )
+
+# =====================
+# Formato general
+# =====================
+#ax.set_title(
+    #"Evolución de becarios según nivel de formación académica",
+    #fontsize=15,
+    #fontweight="bold",
+    #pad=18
+#)
+
+ax.set_xlabel("Año")
+ax.set_ylabel("Número de postulantes")
+
+ax.set_xticks(x)
+ax.set_xticklabels(postulante_edu["AÑO_CONVOCATORIA"])
+
+ax.yaxis.set_major_formatter(
+    mticker.StrMethodFormatter("{x:,.0f}")
+)
+
+ax.set_ylim(0, postulante_edu["TOTAL"].max() * 1.15)
+
+ax.grid(axis="y", linestyle="--", alpha=0.25)
+
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+
+ax.legend(
+    frameon=False,
+    ncol=2,
+    loc="upper right"
+)
+
+plt.tight_layout()
+plt.show()
 
 
 # Se calcula la distribución de postulantes por año
@@ -244,6 +512,233 @@ ax.grid(
 plt.tight_layout()
 plt.show()
 
+# Se calcula el rango de edades de los postulantes de maestría
+edad_resumen = (
+    postulante_maestria.groupby("AÑO_CONVOCATORIA")["EDADBASES"]
+      .agg(
+          EDAD_MINIMA="min",
+          EDAD_MEDIANA="median",
+          EDAD_MAXIMA="max"
+      )
+      .reset_index()
+)
+
+edad_resumen
+
+
+# ======================================
+# Gráfico
+# ======================================
+fig, ax = plt.subplots(figsize=(12, 6))
+
+# Bastones Min-Max
+ax.vlines(
+    edad_resumen["AÑO_CONVOCATORIA"],
+    edad_resumen["EDAD_MINIMA"],
+    edad_resumen["EDAD_MAXIMA"],
+    color="#BFBFBF",
+    linewidth=3,
+    zorder=1
+)
+
+# Puntos mínimos
+ax.scatter(
+    edad_resumen["AÑO_CONVOCATORIA"],
+    edad_resumen["EDAD_MINIMA"],
+    color="#A3AD2C",
+    s=60,
+    label="Edad mínima",
+    zorder=3
+)
+
+# Puntos medianos
+ax.scatter(
+    edad_resumen["AÑO_CONVOCATORIA"],
+    edad_resumen["EDAD_MEDIANA"],
+    color="#0B4F6C",
+    s=110,
+    label="Edad mediana",
+    zorder=4
+)
+
+# Puntos máximos
+ax.scatter(
+    edad_resumen["AÑO_CONVOCATORIA"],
+    edad_resumen["EDAD_MAXIMA"],
+    color="#C0392B",
+    s=60,
+    label="Edad máxima",
+    zorder=3
+)
+
+# ======================================
+# Etiquetas
+# ======================================
+for _, row in edad_resumen.iterrows():
+
+    # Edad mínima
+    ax.annotate(
+        f'{row["EDAD_MINIMA"]:.0f}',
+        (row["AÑO_CONVOCATORIA"], row["EDAD_MINIMA"]),
+        xytext=(-12, -8),
+        textcoords="offset points",
+        fontsize=10,
+        color="#A3AD2C",
+        fontweight="bold"
+    )
+
+    # Edad mediana
+    ax.annotate(
+        f'{row["EDAD_MEDIANA"]:.0f}',
+        (row["AÑO_CONVOCATORIA"], row["EDAD_MEDIANA"]),
+        xytext=(0, 8),
+        textcoords="offset points",
+        ha="center",
+        fontsize=10,
+        color="#0B4F6C",
+        fontweight="bold"
+    )
+
+    # Edad máxima
+    ax.annotate(
+        f'{row["EDAD_MAXIMA"]:.0f}',
+        (row["AÑO_CONVOCATORIA"], row["EDAD_MAXIMA"]),
+        xytext=(10, 6),
+        textcoords="offset points",
+        fontsize=10,
+        color="#C0392B",
+        fontweight="bold"
+    )
+
+# ======================================
+# Formato
+# ======================================
+ax.set_xlabel("Año")
+ax.set_ylabel("Edad (años)")
+
+# Mostrar todos los años
+ax.set_xticks(edad_resumen["AÑO_CONVOCATORIA"])
+ax.set_xticklabels(
+    edad_resumen["AÑO_CONVOCATORIA"],
+    rotation=0
+)
+
+# Espacio para etiquetas
+ax.set_ylim(
+    edad_resumen["EDAD_MINIMA"].min() - 2,
+    edad_resumen["EDAD_MAXIMA"].max() + 4
+)
+
+# Estética
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+
+ax.grid(
+    axis="y",
+    linestyle="--",
+    alpha=0.3
+)
+
+ax.legend(
+    frameon=False,
+    ncol=3,
+    loc="upper center",
+    bbox_to_anchor=(0.5, 1.08)
+)
+
+plt.tight_layout()
+plt.show()
+
+
+# Se calcula el sexo de los postulantes de maestría
+sexo_total = (
+    postulante_maestria
+    .groupby(["AÑO_CONVOCATORIA", "SEXO"])
+    .size()
+    .reset_index(name="TOTAL")
+)
+
+sexo_total["PROPORCION (%)"] = (
+    sexo_total.groupby("AÑO_CONVOCATORIA")["TOTAL"]
+    .transform(lambda x: round(x / x.sum() * 100, 1))
+)
+
+sexo_total
+
+sexo_pivot = sexo_total.pivot(
+    index="AÑO_CONVOCATORIA",
+    columns="SEXO",
+    values="PROPORCION (%)"
+).fillna(0)
+
+sexo_pivot
+
+fig, ax = plt.subplots(figsize=(12, 6))
+
+ax.bar(
+    sexo_pivot.index,
+    sexo_pivot["FEMENINO"],
+    color="#C0392B",
+    label="Femenino"
+)
+
+ax.bar(
+    sexo_pivot.index,
+    sexo_pivot["MASCULINO"],
+    bottom=sexo_pivot["FEMENINO"],
+    color="#0B4F6C",
+    label="Masculino"
+)
+
+# Etiquetas
+for i, año in enumerate(sexo_pivot.index):
+
+    fem = sexo_pivot.loc[año, "FEMENINO"]
+    masc = sexo_pivot.loc[año, "MASCULINO"]
+
+    ax.text(
+        año,
+        fem/2,
+        f"{fem:.1f}%",
+        ha="center",
+        va="center",
+        color="white",
+        fontweight="bold",
+        fontsize=11
+    )
+
+    ax.text(
+        año,
+        fem + masc/2,
+        f"{masc:.1f}%",
+        ha="center",
+        va="center",
+        color="white",
+        fontweight="bold",
+        fontsize=11
+    )
+
+ax.set_ylabel("Participación (%)")
+ax.set_xlabel("Año")
+ax.set_ylim(0, 100)
+
+ax.set_xticks(sexo_pivot.index)
+
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+
+ax.grid(axis="y", linestyle="--", alpha=0.3)
+
+ax.legend(
+    frameon=False,
+    ncol=2,
+    loc="lower center",
+    bbox_to_anchor=(0.5, 1.02)
+)
+
+plt.tight_layout()
+plt.show()
+
 
 ###############################################################################
 # Se analiza los postulantes a programas de doctorado
@@ -313,6 +808,234 @@ ax.grid(
 plt.tight_layout()
 plt.show()
 
+
+edad_resumen = (
+    postulante_doctorado.groupby("AÑO_CONVOCATORIA")["EDADBASES"]
+      .agg(
+          EDAD_MINIMA="min",
+          EDAD_MEDIANA="median",
+          EDAD_MAXIMA="max"
+      )
+      .reset_index()
+)
+
+edad_resumen
+
+
+# ======================================
+# Gráfico
+# ======================================
+fig, ax = plt.subplots(figsize=(12, 6))
+
+# Bastones Min-Max
+ax.vlines(
+    edad_resumen["AÑO_CONVOCATORIA"],
+    edad_resumen["EDAD_MINIMA"],
+    edad_resumen["EDAD_MAXIMA"],
+    color="#BFBFBF",
+    linewidth=3,
+    zorder=1
+)
+
+# Puntos mínimos
+ax.scatter(
+    edad_resumen["AÑO_CONVOCATORIA"],
+    edad_resumen["EDAD_MINIMA"],
+    color="#A3AD2C",
+    s=60,
+    label="Edad mínima",
+    zorder=3
+)
+
+# Puntos medianos
+ax.scatter(
+    edad_resumen["AÑO_CONVOCATORIA"],
+    edad_resumen["EDAD_MEDIANA"],
+    color="#0B4F6C",
+    s=110,
+    label="Edad mediana",
+    zorder=4
+)
+
+# Puntos máximos
+ax.scatter(
+    edad_resumen["AÑO_CONVOCATORIA"],
+    edad_resumen["EDAD_MAXIMA"],
+    color="#C0392B",
+    s=60,
+    label="Edad máxima",
+    zorder=3
+)
+
+# ======================================
+# Etiquetas
+# ======================================
+for _, row in edad_resumen.iterrows():
+
+    # Edad mínima
+    ax.annotate(
+        f'{row["EDAD_MINIMA"]:.0f}',
+        (row["AÑO_CONVOCATORIA"], row["EDAD_MINIMA"]),
+        xytext=(-12, -8),
+        textcoords="offset points",
+        fontsize=10,
+        color="#A3AD2C",
+        fontweight="bold"
+    )
+
+    # Edad mediana
+    ax.annotate(
+        f'{row["EDAD_MEDIANA"]:.0f}',
+        (row["AÑO_CONVOCATORIA"], row["EDAD_MEDIANA"]),
+        xytext=(0, 8),
+        textcoords="offset points",
+        ha="center",
+        fontsize=10,
+        color="#0B4F6C",
+        fontweight="bold"
+    )
+
+    # Edad máxima
+    ax.annotate(
+        f'{row["EDAD_MAXIMA"]:.0f}',
+        (row["AÑO_CONVOCATORIA"], row["EDAD_MAXIMA"]),
+        xytext=(10, 6),
+        textcoords="offset points",
+        fontsize=10,
+        color="#C0392B",
+        fontweight="bold"
+    )
+
+# ======================================
+# Formato
+# ======================================
+ax.set_xlabel("Año")
+ax.set_ylabel("Edad (años)")
+
+# Mostrar todos los años
+ax.set_xticks(edad_resumen["AÑO_CONVOCATORIA"])
+ax.set_xticklabels(
+    edad_resumen["AÑO_CONVOCATORIA"],
+    rotation=0
+)
+
+# Espacio para etiquetas
+ax.set_ylim(
+    edad_resumen["EDAD_MINIMA"].min() - 2,
+    edad_resumen["EDAD_MAXIMA"].max() + 4
+)
+
+# Estética
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+
+ax.grid(
+    axis="y",
+    linestyle="--",
+    alpha=0.3
+)
+
+ax.legend(
+    frameon=False,
+    ncol=3,
+    loc="upper center",
+    bbox_to_anchor=(0.5, 1.08)
+)
+
+plt.tight_layout()
+plt.show()
+
+
+# Se calcula el sexo de los postulantes de doctorado
+sexo_total = (
+    postulante_doctorado
+    .groupby(["AÑO_CONVOCATORIA", "SEXO"])
+    .size()
+    .reset_index(name="TOTAL")
+)
+
+sexo_total["PROPORCION (%)"] = (
+    sexo_total.groupby("AÑO_CONVOCATORIA")["TOTAL"]
+    .transform(lambda x: round(x / x.sum() * 100, 1))
+)
+
+sexo_total
+
+sexo_pivot = sexo_total.pivot(
+    index="AÑO_CONVOCATORIA",
+    columns="SEXO",
+    values="PROPORCION (%)"
+).fillna(0)
+
+sexo_pivot
+
+fig, ax = plt.subplots(figsize=(12, 6))
+
+ax.bar(
+    sexo_pivot.index,
+    sexo_pivot["FEMENINO"],
+    color="#C0392B",
+    label="Femenino"
+)
+
+ax.bar(
+    sexo_pivot.index,
+    sexo_pivot["MASCULINO"],
+    bottom=sexo_pivot["FEMENINO"],
+    color="#0B4F6C",
+    label="Masculino"
+)
+
+# Etiquetas
+for i, año in enumerate(sexo_pivot.index):
+
+    fem = sexo_pivot.loc[año, "FEMENINO"]
+    masc = sexo_pivot.loc[año, "MASCULINO"]
+
+    ax.text(
+        año,
+        fem/2,
+        f"{fem:.1f}%",
+        ha="center",
+        va="center",
+        color="white",
+        fontweight="bold",
+        fontsize=11
+    )
+
+    ax.text(
+        año,
+        fem + masc/2,
+        f"{masc:.1f}%",
+        ha="center",
+        va="center",
+        color="white",
+        fontweight="bold",
+        fontsize=11
+    )
+
+ax.set_ylabel("Participación (%)")
+ax.set_xlabel("Año")
+ax.set_ylim(0, 100)
+
+ax.set_xticks(sexo_pivot.index)
+
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+
+ax.grid(axis="y", linestyle="--", alpha=0.3)
+
+ax.legend(
+    frameon=False,
+    ncol=2,
+    loc="lower center",
+    bbox_to_anchor=(0.5, 1.02)
+)
+
+plt.tight_layout()
+plt.show()
+
+
 ###############################################################################
 # Se realiza un análisis de becarios en función del dataframe postulante
 ###############################################################################
@@ -332,6 +1055,269 @@ pronabec_becario.SEXO.value_counts(normalize=True).round(2)*100
 # Se calcula la edad promedio para la categoria género
 promedio_edad = pronabec_becario.groupby("SEXO")["EDADBASES"].mean()
 print(promedio_edad)
+
+
+edad_resumen = (
+    pronabec_becario.groupby("AÑO_CONVOCATORIA")["EDADBASES"]
+      .agg(
+          EDAD_MINIMA="min",
+          EDAD_MEDIANA="median",
+          EDAD_MAXIMA="max"
+      )
+      .reset_index()
+)
+
+edad_resumen
+
+
+# ======================================
+# Gráfico
+# ======================================
+fig, ax = plt.subplots(figsize=(12, 6))
+
+# Bastones Min-Max
+ax.vlines(
+    edad_resumen["AÑO_CONVOCATORIA"],
+    edad_resumen["EDAD_MINIMA"],
+    edad_resumen["EDAD_MAXIMA"],
+    color="#BFBFBF",
+    linewidth=3,
+    zorder=1
+)
+
+# Puntos mínimos
+ax.scatter(
+    edad_resumen["AÑO_CONVOCATORIA"],
+    edad_resumen["EDAD_MINIMA"],
+    color="#A3AD2C",
+    s=60,
+    label="Edad mínima",
+    zorder=3
+)
+
+# Puntos medianos
+ax.scatter(
+    edad_resumen["AÑO_CONVOCATORIA"],
+    edad_resumen["EDAD_MEDIANA"],
+    color="#0B4F6C",
+    s=110,
+    label="Edad mediana",
+    zorder=4
+)
+
+# Puntos máximos
+ax.scatter(
+    edad_resumen["AÑO_CONVOCATORIA"],
+    edad_resumen["EDAD_MAXIMA"],
+    color="#C0392B",
+    s=60,
+    label="Edad máxima",
+    zorder=3
+)
+
+# ======================================
+# Etiquetas
+# ======================================
+for _, row in edad_resumen.iterrows():
+
+    # Edad mínima
+    ax.annotate(
+        f'{row["EDAD_MINIMA"]:.0f}',
+        (row["AÑO_CONVOCATORIA"], row["EDAD_MINIMA"]),
+        xytext=(-12, -8),
+        textcoords="offset points",
+        fontsize=10,
+        color="#A3AD2C",
+        fontweight="bold"
+    )
+
+    # Edad mediana
+    ax.annotate(
+        f'{row["EDAD_MEDIANA"]:.0f}',
+        (row["AÑO_CONVOCATORIA"], row["EDAD_MEDIANA"]),
+        xytext=(0, 8),
+        textcoords="offset points",
+        ha="center",
+        fontsize=10,
+        color="#0B4F6C",
+        fontweight="bold"
+    )
+
+    # Edad máxima
+    ax.annotate(
+        f'{row["EDAD_MAXIMA"]:.0f}',
+        (row["AÑO_CONVOCATORIA"], row["EDAD_MAXIMA"]),
+        xytext=(10, 6),
+        textcoords="offset points",
+        fontsize=10,
+        color="#C0392B",
+        fontweight="bold"
+    )
+
+# ======================================
+# Formato
+# ======================================
+ax.set_xlabel("Año")
+ax.set_ylabel("Edad (años)")
+
+# Mostrar todos los años
+ax.set_xticks(edad_resumen["AÑO_CONVOCATORIA"])
+ax.set_xticklabels(
+    edad_resumen["AÑO_CONVOCATORIA"],
+    rotation=0
+)
+
+# Espacio para etiquetas
+ax.set_ylim(
+    edad_resumen["EDAD_MINIMA"].min() - 2,
+    edad_resumen["EDAD_MAXIMA"].max() + 4
+)
+
+# Estética
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+
+ax.grid(
+    axis="y",
+    linestyle="--",
+    alpha=0.3
+)
+
+ax.legend(
+    frameon=False,
+    ncol=3,
+    loc="upper center",
+    bbox_to_anchor=(0.5, 1.08)
+)
+
+plt.tight_layout()
+plt.show()
+
+
+becario_edu = pd.pivot_table(pronabec_becario, values="ID_POSTULACION", index="AÑO_CONVOCATORIA", columns="NIVEL_EDUCATIVO", aggfunc="count")
+becario_edu.reset_index(inplace=True)
+
+# Se reemplazan algunas columnas con valor nan a 0
+becario_edu["DOCTORADO"] = becario_edu["DOCTORADO"].fillna(0)
+
+# Se calcula un campo que representa la suma entre los niveles educativos
+becario_edu["TOTAL"] = becario_edu["DOCTORADO"] + becario_edu["MAESTRIA"]
+
+# Se convierte año convocatoria a una variable string
+becario_edu["AÑO_CONVOCATORIA"] = becario_edu["AÑO_CONVOCATORIA"].astype(str)
+
+x = range(len(becario_edu))
+
+color_maestria = "#5FB7C6"
+color_doctorado = "#A3AD2C"
+color_total = "#0B4F6C"
+
+fig, ax = plt.subplots(figsize=(13, 6))
+
+# =====================
+# Barras apiladas
+# Maestría abajo, Doctorado arriba
+# =====================
+b_maestria = ax.bar(
+    x,
+    becario_edu["MAESTRIA"],
+    color=color_maestria,
+    width=0.72,
+    label="Maestría"
+)
+
+b_doctorado = ax.bar(
+    x,
+    becario_edu["DOCTORADO"],
+    bottom=becario_edu["MAESTRIA"],
+    color=color_doctorado,
+    width=0.72,
+    label="Doctorado"
+)
+
+# =====================
+# Etiquetas Maestría
+# =====================
+for i, mae in enumerate(becario_edu["MAESTRIA"]):
+    if mae >= 80:
+        ax.text(
+            i,
+            mae / 2,
+            f"{mae:,.0f}",
+            ha="center",
+            va="center",
+            fontsize=8,
+            fontweight="bold",
+            color="white"
+        )
+
+# =====================
+# Etiquetas Doctorado
+# Se colocan encima del segmento para que no se pierdan
+# =====================
+for i, (mae, doc) in enumerate(zip(becario_edu["MAESTRIA"], becario_edu["DOCTORADO"])):
+    if doc > 0:
+        ax.text(
+            i,
+            mae + doc + 18,
+            f"{doc:,.0f}",
+            ha="center",
+            va="bottom",
+            fontsize=8,
+            fontweight="bold",
+            color=color_doctorado
+        )
+
+# =====================
+# Etiquetas Total
+# =====================
+for i, total in enumerate(becario_edu["TOTAL"]):
+    ax.text(
+        i,
+        total + max(becario_edu["TOTAL"]) * 0.050,
+        f"{total:,.0f}",
+        ha="center",
+        va="bottom",
+        fontsize=9,
+        fontweight="bold",
+        color=color_total
+    )
+
+# =====================
+# Formato general
+# =====================
+#ax.set_title(
+    #"Evolución de becarios según nivel de formación académica",
+    #fontsize=15,
+    #fontweight="bold",
+    #pad=18
+#)
+
+ax.set_xlabel("Año")
+ax.set_ylabel("Número de becarios")
+
+ax.set_xticks(x)
+ax.set_xticklabels(becario_edu["AÑO_CONVOCATORIA"])
+
+ax.yaxis.set_major_formatter(
+    mticker.StrMethodFormatter("{x:,.0f}")
+)
+
+ax.set_ylim(0, becario_edu["TOTAL"].max() * 1.15)
+
+ax.grid(axis="y", linestyle="--", alpha=0.25)
+
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+
+ax.legend(
+    frameon=False,
+    ncol=2,
+    loc="upper right"
+)
+
+plt.tight_layout()
+plt.show()
 
 
 # Se calcula la distribución de las categorias que integran la columna ESTADO_DE_CSP
@@ -484,6 +1470,233 @@ plt.tight_layout()
 plt.show()
 
 
+edad_resumen = (
+    becario_maestria.groupby("AÑO_CONVOCATORIA")["EDADBASES"]
+      .agg(
+          EDAD_MINIMA="min",
+          EDAD_MEDIANA="median",
+          EDAD_MAXIMA="max"
+      )
+      .reset_index()
+)
+
+edad_resumen
+
+
+# ======================================
+# Gráfico
+# ======================================
+fig, ax = plt.subplots(figsize=(12, 6))
+
+# Bastones Min-Max
+ax.vlines(
+    edad_resumen["AÑO_CONVOCATORIA"],
+    edad_resumen["EDAD_MINIMA"],
+    edad_resumen["EDAD_MAXIMA"],
+    color="#BFBFBF",
+    linewidth=3,
+    zorder=1
+)
+
+# Puntos mínimos
+ax.scatter(
+    edad_resumen["AÑO_CONVOCATORIA"],
+    edad_resumen["EDAD_MINIMA"],
+    color="#A3AD2C",
+    s=60,
+    label="Edad mínima",
+    zorder=3
+)
+
+# Puntos medianos
+ax.scatter(
+    edad_resumen["AÑO_CONVOCATORIA"],
+    edad_resumen["EDAD_MEDIANA"],
+    color="#0B4F6C",
+    s=110,
+    label="Edad mediana",
+    zorder=4
+)
+
+# Puntos máximos
+ax.scatter(
+    edad_resumen["AÑO_CONVOCATORIA"],
+    edad_resumen["EDAD_MAXIMA"],
+    color="#C0392B",
+    s=60,
+    label="Edad máxima",
+    zorder=3
+)
+
+# ======================================
+# Etiquetas
+# ======================================
+for _, row in edad_resumen.iterrows():
+
+    # Edad mínima
+    ax.annotate(
+        f'{row["EDAD_MINIMA"]:.0f}',
+        (row["AÑO_CONVOCATORIA"], row["EDAD_MINIMA"]),
+        xytext=(-12, -8),
+        textcoords="offset points",
+        fontsize=10,
+        color="#A3AD2C",
+        fontweight="bold"
+    )
+
+    # Edad mediana
+    ax.annotate(
+        f'{row["EDAD_MEDIANA"]:.0f}',
+        (row["AÑO_CONVOCATORIA"], row["EDAD_MEDIANA"]),
+        xytext=(0, 8),
+        textcoords="offset points",
+        ha="center",
+        fontsize=10,
+        color="#0B4F6C",
+        fontweight="bold"
+    )
+
+    # Edad máxima
+    ax.annotate(
+        f'{row["EDAD_MAXIMA"]:.0f}',
+        (row["AÑO_CONVOCATORIA"], row["EDAD_MAXIMA"]),
+        xytext=(10, 6),
+        textcoords="offset points",
+        fontsize=10,
+        color="#C0392B",
+        fontweight="bold"
+    )
+
+# ======================================
+# Formato
+# ======================================
+ax.set_xlabel("Año")
+ax.set_ylabel("Edad (años)")
+
+# Mostrar todos los años
+ax.set_xticks(edad_resumen["AÑO_CONVOCATORIA"])
+ax.set_xticklabels(
+    edad_resumen["AÑO_CONVOCATORIA"],
+    rotation=0
+)
+
+# Espacio para etiquetas
+ax.set_ylim(
+    edad_resumen["EDAD_MINIMA"].min() - 2,
+    edad_resumen["EDAD_MAXIMA"].max() + 4
+)
+
+# Estética
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+
+ax.grid(
+    axis="y",
+    linestyle="--",
+    alpha=0.3
+)
+
+ax.legend(
+    frameon=False,
+    ncol=3,
+    loc="upper center",
+    bbox_to_anchor=(0.5, 1.08)
+)
+
+plt.tight_layout()
+plt.show()
+
+# Se calcula el sexo de los becarios de maestría
+sexo_total = (
+    becario_maestria
+    .groupby(["AÑO_CONVOCATORIA", "SEXO"])
+    .size()
+    .reset_index(name="TOTAL")
+)
+
+sexo_total["PROPORCION (%)"] = (
+    sexo_total.groupby("AÑO_CONVOCATORIA")["TOTAL"]
+    .transform(lambda x: round(x / x.sum() * 100, 1))
+)
+
+sexo_total
+
+sexo_pivot = sexo_total.pivot(
+    index="AÑO_CONVOCATORIA",
+    columns="SEXO",
+    values="PROPORCION (%)"
+).fillna(0)
+
+sexo_pivot
+
+fig, ax = plt.subplots(figsize=(12, 6))
+
+ax.bar(
+    sexo_pivot.index,
+    sexo_pivot["FEMENINO"],
+    color="#C0392B",
+    label="Femenino"
+)
+
+ax.bar(
+    sexo_pivot.index,
+    sexo_pivot["MASCULINO"],
+    bottom=sexo_pivot["FEMENINO"],
+    color="#0B4F6C",
+    label="Masculino"
+)
+
+# Etiquetas
+for i, año in enumerate(sexo_pivot.index):
+
+    fem = sexo_pivot.loc[año, "FEMENINO"]
+    masc = sexo_pivot.loc[año, "MASCULINO"]
+
+    ax.text(
+        año,
+        fem/2,
+        f"{fem:.1f}%",
+        ha="center",
+        va="center",
+        color="white",
+        fontweight="bold",
+        fontsize=11
+    )
+
+    ax.text(
+        año,
+        fem + masc/2,
+        f"{masc:.1f}%",
+        ha="center",
+        va="center",
+        color="white",
+        fontweight="bold",
+        fontsize=11
+    )
+
+ax.set_ylabel("Participación (%)")
+ax.set_xlabel("Año")
+ax.set_ylim(0, 100)
+
+ax.set_xticks(sexo_pivot.index)
+
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+
+ax.grid(axis="y", linestyle="--", alpha=0.3)
+
+ax.legend(
+    frameon=False,
+    ncol=2,
+    loc="lower center",
+    bbox_to_anchor=(0.5, 1.02)
+)
+
+plt.tight_layout()
+plt.show()
+
+
+
 ###############################################################################
 # Se analiza los becarios de programas de doctorado
 ###############################################################################
@@ -561,39 +1774,288 @@ ax.grid(
 plt.tight_layout()
 plt.show()
 
+
+edad_resumen = (
+    becario_doctorado.groupby("AÑO_CONVOCATORIA")["EDADBASES"]
+      .agg(
+          EDAD_MINIMA="min",
+          EDAD_MEDIANA="median",
+          EDAD_MAXIMA="max"
+      )
+      .reset_index()
+)
+
+edad_resumen
+
+
+# ======================================
+# Gráfico
+# ======================================
+fig, ax = plt.subplots(figsize=(12, 6))
+
+# Bastones Min-Max
+ax.vlines(
+    edad_resumen["AÑO_CONVOCATORIA"],
+    edad_resumen["EDAD_MINIMA"],
+    edad_resumen["EDAD_MAXIMA"],
+    color="#BFBFBF",
+    linewidth=3,
+    zorder=1
+)
+
+# Puntos mínimos
+ax.scatter(
+    edad_resumen["AÑO_CONVOCATORIA"],
+    edad_resumen["EDAD_MINIMA"],
+    color="#A3AD2C",
+    s=60,
+    label="Edad mínima",
+    zorder=3
+)
+
+# Puntos medianos
+ax.scatter(
+    edad_resumen["AÑO_CONVOCATORIA"],
+    edad_resumen["EDAD_MEDIANA"],
+    color="#0B4F6C",
+    s=110,
+    label="Edad mediana",
+    zorder=4
+)
+
+# Puntos máximos
+ax.scatter(
+    edad_resumen["AÑO_CONVOCATORIA"],
+    edad_resumen["EDAD_MAXIMA"],
+    color="#C0392B",
+    s=60,
+    label="Edad máxima",
+    zorder=3
+)
+
+# ======================================
+# Etiquetas
+# ======================================
+for _, row in edad_resumen.iterrows():
+
+    # Edad mínima
+    ax.annotate(
+        f'{row["EDAD_MINIMA"]:.0f}',
+        (row["AÑO_CONVOCATORIA"], row["EDAD_MINIMA"]),
+        xytext=(-12, -8),
+        textcoords="offset points",
+        fontsize=10,
+        color="#A3AD2C",
+        fontweight="bold"
+    )
+
+    # Edad mediana
+    ax.annotate(
+        f'{row["EDAD_MEDIANA"]:.0f}',
+        (row["AÑO_CONVOCATORIA"], row["EDAD_MEDIANA"]),
+        xytext=(0, 8),
+        textcoords="offset points",
+        ha="center",
+        fontsize=10,
+        color="#0B4F6C",
+        fontweight="bold"
+    )
+
+    # Edad máxima
+    ax.annotate(
+        f'{row["EDAD_MAXIMA"]:.0f}',
+        (row["AÑO_CONVOCATORIA"], row["EDAD_MAXIMA"]),
+        xytext=(10, 6),
+        textcoords="offset points",
+        fontsize=10,
+        color="#C0392B",
+        fontweight="bold"
+    )
+
+# ======================================
+# Formato
+# ======================================
+ax.set_xlabel("Año")
+ax.set_ylabel("Edad (años)")
+
+# Mostrar todos los años
+ax.set_xticks(edad_resumen["AÑO_CONVOCATORIA"])
+ax.set_xticklabels(
+    edad_resumen["AÑO_CONVOCATORIA"],
+    rotation=0
+)
+
+# Espacio para etiquetas
+ax.set_ylim(
+    edad_resumen["EDAD_MINIMA"].min() - 2,
+    edad_resumen["EDAD_MAXIMA"].max() + 4
+)
+
+# Estética
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+
+ax.grid(
+    axis="y",
+    linestyle="--",
+    alpha=0.3
+)
+
+ax.legend(
+    frameon=False,
+    ncol=3,
+    loc="upper center",
+    bbox_to_anchor=(0.5, 1.08)
+)
+
+plt.tight_layout()
+plt.show()
+
+
+# Se calcula el sexo de los becarios de doctorado
+sexo_total = (
+    becario_doctorado
+    .groupby(["AÑO_CONVOCATORIA", "SEXO"])
+    .size()
+    .reset_index(name="TOTAL")
+)
+
+sexo_total["PROPORCION (%)"] = (
+    sexo_total.groupby("AÑO_CONVOCATORIA")["TOTAL"]
+    .transform(lambda x: round(x / x.sum() * 100, 1))
+)
+
+sexo_total
+
+sexo_pivot = sexo_total.pivot(
+    index="AÑO_CONVOCATORIA",
+    columns="SEXO",
+    values="PROPORCION (%)"
+).fillna(0)
+
+sexo_pivot
+
+fig, ax = plt.subplots(figsize=(12, 6))
+
+ax.bar(
+    sexo_pivot.index,
+    sexo_pivot["FEMENINO"],
+    color="#C0392B",
+    label="Femenino"
+)
+
+ax.bar(
+    sexo_pivot.index,
+    sexo_pivot["MASCULINO"],
+    bottom=sexo_pivot["FEMENINO"],
+    color="#0B4F6C",
+    label="Masculino"
+)
+
+# Etiquetas
+for i, año in enumerate(sexo_pivot.index):
+
+    fem = sexo_pivot.loc[año, "FEMENINO"]
+    masc = sexo_pivot.loc[año, "MASCULINO"]
+
+    ax.text(
+        año,
+        fem/2,
+        f"{fem:.1f}%",
+        ha="center",
+        va="center",
+        color="white",
+        fontweight="bold",
+        fontsize=11
+    )
+
+    ax.text(
+        año,
+        fem + masc/2,
+        f"{masc:.1f}%",
+        ha="center",
+        va="center",
+        color="white",
+        fontweight="bold",
+        fontsize=11
+    )
+
+ax.set_ylabel("Participación (%)")
+ax.set_xlabel("Año")
+ax.set_ylim(0, 100)
+
+ax.set_xticks(sexo_pivot.index)
+
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+
+ax.grid(axis="y", linestyle="--", alpha=0.3)
+
+ax.legend(
+    frameon=False,
+    ncol=2,
+    loc="lower center",
+    bbox_to_anchor=(0.5, 1.02)
+)
+
+plt.tight_layout()
+plt.show()
+
+
 ##############################################################################
 # Se analiza el pais de destino de los becarios de programas de maestria y doctorado
 # considerando los dataframes becario_maestria y becario_doctorado
 ###############################################################################
 
 # Se realiza el análisis para becarios de programas de maestría
+total = becario_maestria["PAISDESTINO"].value_counts()
 
-pais_maestria = becario_maestria.PAISDESTINO.value_counts(normalize=True).round(2)*100
-pais_maestria = pais_maestria.to_frame()
+proporcion = (
+    becario_maestria["PAISDESTINO"]
+    .value_counts(normalize=True)
+    .mul(100)
+    .round(2)
+)
+
+pais_maestria = pd.DataFrame({
+    "TOTAL": total,
+    "PROPORCION (%)": proporcion
+})
+
+pais_maestria
 pais_maestria.reset_index(inplace=True)
-pais_maestria.rename(columns=({"proportion":"Porcentaje (%)"}), inplace=True)
 pais_maestria = pais_maestria.head(10)
 pais_maestria.columns
 
-pais_maestria = pais_maestria.sort_values("Porcentaje (%)", ascending=True)
+pais_maestria = pais_maestria.sort_values("TOTAL", ascending=True)
 
 color_principal = "#0B4F6C"   # azul institucional
 color_secundario = "#5FB7C6"  # celeste
 
-colors = [color_secundario] * len(pais_maestria)
-colors[-1] = color_principal  # destacar el mayor
-
 plt.figure(figsize=(12, 6))
 
-bars = plt.barh(pais_maestria["PAISDESTINO"], pais_maestria["Porcentaje (%)"], color=colors)
+bars = plt.barh(
+    pais_maestria["PAISDESTINO"],
+    pais_maestria["PROPORCION (%)"],
+    color=color_principal
+)
 
-# Etiquetas
-for i, v in enumerate(pais_maestria["Porcentaje (%)"]):
-    plt.text(v + 0.5, i, f"{v:.0f}%", va="center", fontsize=10)
+# Etiquetas: porcentaje + total
+for i, (pct, total) in enumerate(
+    zip(
+        pais_maestria["PROPORCION (%)"],
+        pais_maestria["TOTAL"]
+    )
+):
+    plt.text(
+        pct + 0.5,
+        i,
+        f"{pct:.1f}% ({total:,})",
+        va="center",
+        fontsize=14
+    )
 
-# Estética consultoría
-plt.xlabel("Porcentaje (%)")
-#plt.title("Distribución de subvenciones por tipo de intervención", fontsize=13)
+plt.xlabel("Participación (%)")
 
 plt.gca().spines["top"].set_visible(False)
 plt.gca().spines["right"].set_visible(False)
@@ -605,33 +2067,54 @@ plt.show()
 
 
 # Se realiza el análisis para becarios de programas de doctorado
+total = becario_doctorado["PAISDESTINO"].value_counts()
 
-pais_doctorado = becario_doctorado.PAISDESTINO.value_counts(normalize=True).round(2)*100
-pais_doctorado = pais_doctorado.to_frame()
+proporcion = (
+    becario_doctorado["PAISDESTINO"]
+    .value_counts(normalize=True)
+    .mul(100)
+    .round(2)
+)
+
+pais_doctorado = pd.DataFrame({
+    "TOTAL": total,
+    "PROPORCION (%)": proporcion
+})
+
+pais_doctorado
 pais_doctorado.reset_index(inplace=True)
-pais_doctorado.rename(columns=({"proportion":"Porcentaje (%)"}), inplace=True)
 pais_doctorado = pais_doctorado.head(10)
 pais_doctorado.columns
 
-pais_doctorado = pais_doctorado.sort_values("Porcentaje (%)", ascending=True)
+pais_doctorado = pais_doctorado.sort_values("TOTAL", ascending=True)
 
 color_principal = "#0B4F6C"   # azul institucional
 color_secundario = "#5FB7C6"  # celeste
 
-colors = [color_secundario] * len(pais_doctorado)
-colors[-1] = color_principal  # destacar el mayor
-
 plt.figure(figsize=(12, 6))
 
-bars = plt.barh(pais_doctorado["PAISDESTINO"], pais_doctorado["Porcentaje (%)"], color=colors)
+bars = plt.barh(
+    pais_doctorado["PAISDESTINO"],
+    pais_doctorado["PROPORCION (%)"],
+    color=color_principal
+)
 
-# Etiquetas
-for i, v in enumerate(pais_doctorado["Porcentaje (%)"]):
-    plt.text(v + 0.5, i, f"{v:.0f}%", va="center", fontsize=10)
+# Etiquetas: porcentaje + total
+for i, (pct, total) in enumerate(
+    zip(
+        pais_doctorado["PROPORCION (%)"],
+        pais_doctorado["TOTAL"]
+    )
+):
+    plt.text(
+        pct + 0.5,
+        i,
+        f"{pct:.1f}% ({total:,})",
+        va="center",
+        fontsize=14
+    )
 
-# Estética consultoría
-plt.xlabel("Porcentaje (%)")
-#plt.title("Distribución de subvenciones por tipo de intervención", fontsize=13)
+plt.xlabel("Participación (%)")
 
 plt.gca().spines["top"].set_visible(False)
 plt.gca().spines["right"].set_visible(False)
@@ -640,6 +2123,7 @@ plt.grid(axis="x", linestyle="--", alpha=0.3)
 
 plt.tight_layout()
 plt.show()
+
 
 ###############################################################################
 # Se analiza la institución considerando los dataframes becario_maestria y
@@ -647,72 +2131,245 @@ plt.show()
 ###############################################################################
 
 # Se realiza el análisis para becarios de programas de maestría
+total = becario_maestria["INSTITUCION"].value_counts()
 
-institucion_maestria = becario_maestria.INSTITUCION.value_counts(normalize=True).round(2)*100
-institucion_maestria = institucion_maestria.to_frame()
+proporcion = (
+    becario_maestria["INSTITUCION"]
+    .value_counts(normalize=True)
+    .mul(100)
+    .round(2)
+)
+
+institucion_maestria = pd.DataFrame({
+    "TOTAL": total,
+    "PROPORCION (%)": proporcion
+})
+
+institucion_maestria
 institucion_maestria.reset_index(inplace=True)
-institucion_maestria.rename(columns=({"proportion":"Porcentaje (%)"}), inplace=True)
 institucion_maestria = institucion_maestria.head(10)
 institucion_maestria.columns
 
-institucion_maestria = institucion_maestria.sort_values("Porcentaje (%)", ascending=True)
+#institucion_maestria = institucion_maestria.sort_values("TOTAL", ascending=True)
 
 color_principal = "#0B4F6C"   # azul institucional
-color_secundario = "#5FB7C6"  # celeste
+color_destacado = "#6B8E23"   # granate
 
-colors = [color_secundario] * len(institucion_maestria)
-colors[-1] = color_principal  # destacar el mayor
+colores = [
+    color_destacado
+    if uni in [
+        "PONTIFICIA UNIVERSIDAD CATOLICA DEL PERU",
+        "UNIVERSIDAD PRIVADA SAN IGNACIO DE LOYOLA"
+    ]
+    else color_principal
+    for uni in institucion_maestria["INSTITUCION"]
+]
+
 
 plt.figure(figsize=(12, 6))
 
-bars = plt.barh(institucion_maestria["INSTITUCION"], institucion_maestria["Porcentaje (%)"], color=colors)
+bars = plt.barh(
+    institucion_maestria["INSTITUCION"],
+    institucion_maestria["PROPORCION (%)"],
+    color=colores
+)
 
-# Etiquetas
-for i, v in enumerate(institucion_maestria["Porcentaje (%)"]):
-    plt.text(v + 0.5, i, f"{v:.0f}%", va="center", fontsize=10)
+for i, (pct, total) in enumerate(
+    zip(
+        institucion_maestria["PROPORCION (%)"],
+        institucion_maestria["TOTAL"]
+    )
+):
+    plt.text(
+        pct + 0.2,
+        i,
+        f"{pct:.1f}% ({total:,})",
+        va="center",
+        fontsize=14
+    )
 
-# Estética consultoría
-plt.xlabel("Porcentaje (%)")
-#plt.title("Distribución de subvenciones por tipo de intervención", fontsize=13)
+plt.xlabel("Participación (%)")
 
+plt.gca().invert_yaxis()
 plt.gca().spines["top"].set_visible(False)
 plt.gca().spines["right"].set_visible(False)
 
 plt.grid(axis="x", linestyle="--", alpha=0.3)
+
+plt.tight_layout()
+plt.show()
+
+###############################################################################
+# Construyo un campo adicional para mi dataframe becario_maestria
+###############################################################################
+
+universidades_peruanas = [
+    "PONTIFICIA UNIVERSIDAD CATOLICA DEL PERU",
+    "UNIVERSIDAD PERUANA CAYETANO HEREDIA",
+    "UNIVERSIDAD PRIVADA SAN IGNACIO DE LOYOLA",
+    "UNIVERSIDAD DE PIURA"
+]
+
+becario_maestria["ANALISIS_INSTITUCION"] = (
+    becario_maestria["INSTITUCION"]
+    .str.upper()
+    .isin(universidades_peruanas)
+    .map({True: "PERUANA", False: "NO PERUANA"})
+)
+
+
+ana_total = (
+    becario_maestria
+    .groupby(["AÑO_CONVOCATORIA", "ANALISIS_INSTITUCION"])
+    .size()
+    .reset_index(name="TOTAL")
+)
+
+ana_total["PROPORCION (%)"] = (
+    ana_total.groupby("AÑO_CONVOCATORIA")["TOTAL"]
+    .transform(lambda x: round(x / x.sum() * 100, 1))
+)
+
+ana_total
+
+ana_pivot = ana_total.pivot(
+    index="AÑO_CONVOCATORIA",
+    columns="ANALISIS_INSTITUCION",
+    values="PROPORCION (%)"
+).fillna(0)
+
+ana_pivot
+
+fig, ax = plt.subplots(figsize=(12, 6))
+
+ax.bar(
+    ana_pivot.index,
+    ana_pivot["NO PERUANA"],
+    color="#C0392B",
+    label="No peruana"
+)
+
+ax.bar(
+    ana_pivot.index,
+    ana_pivot["PERUANA"],
+    bottom=ana_pivot["NO PERUANA"],
+    color="#0B4F6C",
+    label="Peruana"
+)
+
+# Etiquetas solo si el valor es mayor a 0
+for año in ana_pivot.index:
+
+    no_peruana = ana_pivot.loc[año, "NO PERUANA"]
+    peruana = ana_pivot.loc[año, "PERUANA"]
+
+    if no_peruana > 0:
+        ax.text(
+            año,
+            no_peruana / 2,
+            f"{no_peruana:.1f}%",
+            ha="center",
+            va="center",
+            color="white",
+            fontweight="bold",
+            fontsize=10
+        )
+
+    if peruana > 0:
+        ax.text(
+            año,
+            no_peruana + peruana / 2,
+            f"{peruana:.1f}%",
+            ha="center",
+            va="center",
+            color="white",
+            fontweight="bold",
+            fontsize=10
+        )
+
+ax.set_ylabel("Participación (%)")
+ax.set_xlabel("Año")
+ax.set_ylim(0, 100)
+
+ax.set_xticks(ana_pivot.index)
+
+ax.spines["top"].set_visible(False)
+ax.spines["right"].set_visible(False)
+
+ax.grid(axis="y", linestyle="--", alpha=0.3)
+
+ax.legend(
+    frameon=False,
+    ncol=2,
+    loc="lower center",
+    bbox_to_anchor=(0.5, 1.02)
+)
 
 plt.tight_layout()
 plt.show()
 
 
 # Se realiza el análisis para becarios de programas de doctorado
+total = becario_doctorado["INSTITUCION"].value_counts()
 
-institucion_doctorado = becario_doctorado.INSTITUCION.value_counts(normalize=True).round(2)*100
-institucion_doctorado = institucion_doctorado.to_frame()
+proporcion = (
+    becario_doctorado["INSTITUCION"]
+    .value_counts(normalize=True)
+    .mul(100)
+    .round(2)
+)
+
+institucion_doctorado = pd.DataFrame({
+    "TOTAL": total,
+    "PROPORCION (%)": proporcion
+})
+
+institucion_doctorado
 institucion_doctorado.reset_index(inplace=True)
-institucion_doctorado.rename(columns=({"proportion":"Porcentaje (%)"}), inplace=True)
 institucion_doctorado = institucion_doctorado.head(10)
 institucion_doctorado.columns
 
-institucion_doctorado = institucion_doctorado.sort_values("Porcentaje (%)", ascending=True)
+#institucion_maestria = institucion_maestria.sort_values("TOTAL", ascending=True)
 
 color_principal = "#0B4F6C"   # azul institucional
-color_secundario = "#5FB7C6"  # celeste
+color_destacado = "#8E2C2C"   # granate
 
-colors = [color_secundario] * len(institucion_maestria)
-colors[-1] = color_principal  # destacar el mayor
+colores = [
+    color_destacado
+    if uni in [
+        "PONTIFICIA UNIVERSIDAD CATOLICA DEL PERU",
+        "UNIVERSIDAD PRIVADA SAN IGNACIO DE LOYOLA"
+    ]
+    else color_principal
+    for uni in institucion_doctorado["INSTITUCION"]
+]
+
 
 plt.figure(figsize=(12, 6))
 
-bars = plt.barh(institucion_doctorado["INSTITUCION"], institucion_doctorado["Porcentaje (%)"], color=colors)
+bars = plt.barh(
+    institucion_doctorado["INSTITUCION"],
+    institucion_doctorado["PROPORCION (%)"],
+    color=colores
+)
 
-# Etiquetas
-for i, v in enumerate(institucion_doctorado["Porcentaje (%)"]):
-    plt.text(v + 0.5, i, f"{v:.0f}%", va="center", fontsize=10)
+for i, (pct, total) in enumerate(
+    zip(
+        institucion_doctorado["PROPORCION (%)"],
+        institucion_doctorado["TOTAL"]
+    )
+):
+    plt.text(
+        pct + 0.2,
+        i,
+        f"{pct:.1f}% ({total:,})",
+        va="center",
+        fontsize=14
+    )
 
-# Estética consultoría
-plt.xlabel("Porcentaje (%)")
-#plt.title("Distribución de subvenciones por tipo de intervención", fontsize=13)
+plt.xlabel("Participación (%)")
 
+plt.gca().invert_yaxis()
 plt.gca().spines["top"].set_visible(False)
 plt.gca().spines["right"].set_visible(False)
 
@@ -720,6 +2377,7 @@ plt.grid(axis="x", linestyle="--", alpha=0.3)
 
 plt.tight_layout()
 plt.show()
+
 
 ###############################################################################
 # Se realiza un análisis considerando los títulos STEM
@@ -772,7 +2430,7 @@ wedges, texts, autotexts = ax.pie(
         "linewidth": 2
     },
     textprops={
-        "fontsize": 12,
+        "fontsize": 14,
         "fontweight": "bold"
     }
 )
@@ -780,7 +2438,7 @@ wedges, texts, autotexts = ax.pie(
 # Estilo de porcentajes
 for autotext in autotexts:
     autotext.set_color("white")
-    autotext.set_fontsize(13)
+    autotext.set_fontsize(14)
     autotext.set_fontweight("bold")
 
 # Título
@@ -884,7 +2542,7 @@ wedges, texts, autotexts = ax.pie(
         "linewidth": 2
     },
     textprops={
-        "fontsize": 12,
+        "fontsize": 14,
         "fontweight": "bold"
     }
 )
@@ -892,7 +2550,7 @@ wedges, texts, autotexts = ax.pie(
 # Estilo de porcentajes
 for autotext in autotexts:
     autotext.set_color("white")
-    autotext.set_fontsize(13)
+    autotext.set_fontsize(14)
     autotext.set_fontweight("bold")
 
 # Título
@@ -1112,7 +2770,7 @@ wedges, texts, autotexts = ax.pie(
         "linewidth": 2
     },
     textprops={
-        "fontsize": 11,
+        "fontsize": 14,
         "fontweight": "bold"
     }
 )
@@ -1206,7 +2864,7 @@ wedges, texts, autotexts = ax.pie(
         "linewidth": 2
     },
     textprops={
-        "fontsize": 11,
+        "fontsize": 14,
         "fontweight": "bold"
     }
 )
@@ -1229,6 +2887,9 @@ plt.show()
 
 segunda = pronabec_becario[(pronabec_becario["AÑO_CONVOCATORIA"] >= 2022) & (pronabec_becario["AÑO_CONVOCATORIA"] <= 2025)]
 segunda.columns
+
+segunda.NIVEL_EDUCATIVO.value_counts()
+
 
 # Se renombran algunos registros de la columna INSTITUCION_ORIGEN_PREGRADO del dataframe segunda
 segunda["INSTITUCION_ORIGEN_PREGRADO"] = segunda["INSTITUCION_ORIGEN_PREGRADO"].replace({
@@ -1479,33 +3140,54 @@ plt.show()
 ###############################################################################
 
 # Se realiza el análisis para becarios de programas de maestría
+total = segunda_maestria["INSTITUCION_ORIGEN_PREGRADO"].value_counts()
 
-pais_segunda_maestria = segunda_maestria.INSTITUCION_ORIGEN_PREGRADO.value_counts(normalize=True).round(2)*100
-pais_segunda_maestria = pais_segunda_maestria.to_frame()
+proporcion = (
+    segunda_maestria["INSTITUCION_ORIGEN_PREGRADO"]
+    .value_counts(normalize=True)
+    .mul(100)
+    .round(2)
+)
+
+pais_segunda_maestria = pd.DataFrame({
+    "TOTAL": total,
+    "PROPORCION (%)": proporcion
+})
+
+pais_segunda_maestria
 pais_segunda_maestria.reset_index(inplace=True)
-pais_segunda_maestria.rename(columns=({"proportion":"Porcentaje (%)"}), inplace=True)
 pais_segunda_maestria = pais_segunda_maestria.head(10)
 pais_segunda_maestria.columns
 
-pais_segunda_maestria = pais_segunda_maestria.sort_values("Porcentaje (%)", ascending=True)
+pais_segunda_maestria = pais_segunda_maestria.sort_values("TOTAL", ascending=True)
 
 color_principal = "#0B4F6C"   # azul institucional
 color_secundario = "#5FB7C6"  # celeste
 
-colors = [color_secundario] * len(pais_maestria)
-colors[-1] = color_principal  # destacar el mayor
-
 plt.figure(figsize=(12, 6))
 
-bars = plt.barh(pais_segunda_maestria["INSTITUCION_ORIGEN_PREGRADO"], pais_segunda_maestria["Porcentaje (%)"], color=colors)
+bars = plt.barh(
+    pais_segunda_maestria["INSTITUCION_ORIGEN_PREGRADO"],
+    pais_segunda_maestria["PROPORCION (%)"],
+    color=color_principal
+)
 
-# Etiquetas
-for i, v in enumerate(pais_segunda_maestria["Porcentaje (%)"]):
-    plt.text(v + 0.5, i, f"{v:.0f}%", va="center", fontsize=10)
+# Etiquetas: porcentaje + total
+for i, (pct, total) in enumerate(
+    zip(
+        pais_segunda_maestria["PROPORCION (%)"],
+        pais_segunda_maestria["TOTAL"]
+    )
+):
+    plt.text(
+        pct + 0.5,
+        i,
+        f"{pct:.1f}% ({total:,})",
+        va="center",
+        fontsize=14
+    )
 
-# Estética consultoría
-plt.xlabel("Porcentaje (%)")
-#plt.title("Distribución de subvenciones por tipo de intervención", fontsize=13)
+plt.xlabel("Participación (%)")
 
 plt.gca().spines["top"].set_visible(False)
 plt.gca().spines["right"].set_visible(False)
@@ -1517,33 +3199,54 @@ plt.show()
 
 
 # Se realiza el análisis para becarios de programas de doctorado
+total = segunda_doctorado["INSTITUCION_ORIGEN_PREGRADO"].value_counts()
 
-pais_segunda_doctorado = segunda_doctorado.INSTITUCION_ORIGEN_PREGRADO.value_counts(normalize=True).round(2)*100
-pais_segunda_doctorado = pais_segunda_doctorado.to_frame()
+proporcion = (
+    segunda_doctorado["INSTITUCION_ORIGEN_PREGRADO"]
+    .value_counts(normalize=True)
+    .mul(100)
+    .round(2)
+)
+
+pais_segunda_doctorado = pd.DataFrame({
+    "TOTAL": total,
+    "PROPORCION (%)": proporcion
+})
+
+pais_segunda_doctorado
 pais_segunda_doctorado.reset_index(inplace=True)
-pais_segunda_doctorado.rename(columns=({"proportion":"Porcentaje (%)"}), inplace=True)
 pais_segunda_doctorado = pais_segunda_doctorado.head(10)
 pais_segunda_doctorado.columns
 
-pais_segunda_doctorado = pais_segunda_doctorado.sort_values("Porcentaje (%)", ascending=True)
+pais_segunda_doctorado = pais_segunda_doctorado.sort_values("TOTAL", ascending=True)
 
 color_principal = "#0B4F6C"   # azul institucional
 color_secundario = "#5FB7C6"  # celeste
 
-colors = [color_secundario] * len(pais_segunda_doctorado)
-colors[-1] = color_principal  # destacar el mayor
-
 plt.figure(figsize=(12, 6))
 
-bars = plt.barh(pais_segunda_doctorado["INSTITUCION_ORIGEN_PREGRADO"], pais_segunda_doctorado["Porcentaje (%)"], color=colors)
+bars = plt.barh(
+    pais_segunda_doctorado["INSTITUCION_ORIGEN_PREGRADO"],
+    pais_segunda_doctorado["PROPORCION (%)"],
+    color=color_principal
+)
 
-# Etiquetas
-for i, v in enumerate(pais_segunda_doctorado["Porcentaje (%)"]):
-    plt.text(v + 0.5, i, f"{v:.0f}%", va="center", fontsize=10)
+# Etiquetas: porcentaje + total
+for i, (pct, total) in enumerate(
+    zip(
+        pais_segunda_doctorado["PROPORCION (%)"],
+        pais_segunda_doctorado["TOTAL"]
+    )
+):
+    plt.text(
+        pct + 0.5,
+        i,
+        f"{pct:.1f}% ({total:,})",
+        va="center",
+        fontsize=14
+    )
 
-# Estética consultoría
-plt.xlabel("Porcentaje (%)")
-#plt.title("Distribución de subvenciones por tipo de intervención", fontsize=13)
+plt.xlabel("Participación (%)")
 
 plt.gca().spines["top"].set_visible(False)
 plt.gca().spines["right"].set_visible(False)
@@ -1552,6 +3255,7 @@ plt.grid(axis="x", linestyle="--", alpha=0.3)
 
 plt.tight_layout()
 plt.show()
+
 
 ###############################################################################
 # Se analiza las regiones de los becarios de programas de maestria y doctorado
@@ -1632,6 +3336,11 @@ for idx, row in peru.iterrows():
 plt.tight_layout()
 plt.show()
 
+# no considera el sin registro
+caso = peru_maestria[peru_maestria["Region"]!="SIN REGISTRO"]
+caso["cantidad"].sum()
+
+
 
 # Becarios de programas de doctorado
 
@@ -1707,5 +3416,97 @@ for idx, row in peru.iterrows():
 
 plt.tight_layout()
 plt.show()
+
+# no considera el sin registro
+caso = peru_doctorado[peru_doctorado["Region"]!="SIN REGISTRO"]
+caso["cantidad"].sum()
+
+
+###############################################################################
+# Modelo predictivo para predicir el cumplimiento de becarios
+###############################################################################
+
+pronabec_becario.columns
+modelo = pronabec_becario[pronabec_becario["ESTADO_DE_CSP"]=="CUMPLIO"]
+
+cumplidor = modelo[["ESTADO_DE_CSP","SEXO", "EDADBASES", "NIVEL_EDUCATIVO", "PAISDESTINO", "INSTITUCION"]]
+
+# =========================
+# 1. Resumen general
+# =========================
+total_cumplidores = len(cumplidor)
+
+print(f"Total de cumplidores: {total_cumplidores:,}")
+
+# =========================
+# 2. Perfil de edad
+# =========================
+perfil_edad = cumplidor["EDADBASES"].describe()
+
+print(perfil_edad)
+
+# =========================
+# 3. Función para tablas de perfil
+# =========================
+def tabla_perfil(data, columna):
+    tabla = (
+        data[columna]
+        .value_counts()
+        .reset_index()
+    )
+    
+    tabla.columns = [columna, "TOTAL"]
+    
+    tabla["PROPORCION (%)"] = (
+        tabla["TOTAL"] / tabla["TOTAL"].sum() * 100
+    ).round(1)
+    
+    return tabla
+
+# =========================
+# 4. Perfil categórico
+# =========================
+perfil_sexo = tabla_perfil(cumplidor, "SEXO")
+perfil_nivel = tabla_perfil(cumplidor, "NIVEL_EDUCATIVO")
+perfil_pais = tabla_perfil(cumplidor, "PAISDESTINO")
+perfil_institucion = tabla_perfil(cumplidor, "INSTITUCION")
+
+# Mostrar resultados
+print("\nPerfil por sexo")
+print(perfil_sexo)
+
+print("\nPerfil por nivel educativo")
+print(perfil_nivel)
+
+print("\nPerfil por país de destino")
+print(perfil_pais.head(10))
+
+print("\nPerfil por institución")
+print(perfil_institucion.head(10))
+
+perfil_cumplidor = {
+    "Total cumplidores": len(cumplidor),
+    "Edad promedio": round(cumplidor["EDADBASES"].mean(), 1),
+    "Edad mediana": round(cumplidor["EDADBASES"].median(), 1),
+    "Sexo predominante": cumplidor["SEXO"].mode()[0],
+    "Nivel predominante": cumplidor["NIVEL_EDUCATIVO"].mode()[0],
+    "País destino principal": cumplidor["PAISDESTINO"].mode()[0],
+    "Institución principal": cumplidor["INSTITUCION"].mode()[0]
+}
+
+perfil_cumplidor = pd.DataFrame(
+    perfil_cumplidor.items(),
+    columns=["Indicador", "Valor"]
+)
+
+perfil_cumplidor
+
+
+
+
+
+
+
+
 
 
