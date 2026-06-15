@@ -25,6 +25,17 @@ import geopandas
 from shapely.geometry import Point, Polygon
 from matplotlib.colors import LinearSegmentedColormap
 import matplotlib.ticker as mticker
+import statsmodels.api as sm
+import statsmodels.formula.api as smf
+
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import (
+    confusion_matrix,
+    classification_report,
+    roc_auc_score,
+    roc_curve
+)
+
 
 ###############################################################################
 # Se describen los colores que integran la paleta institucional para mis gráficos
@@ -2218,6 +2229,10 @@ becario_maestria["ANALISIS_INSTITUCION"] = (
 )
 
 
+jajaja = becario_maestria[becario_maestria["ANALISIS_INSTITUCION"]=="PERUANA"]
+jajaja.INSTITUCION.value_counts()
+
+
 ana_total = (
     becario_maestria
     .groupby(["AÑO_CONVOCATORIA", "ANALISIS_INSTITUCION"])
@@ -3500,6 +3515,134 @@ perfil_cumplidor = pd.DataFrame(
 )
 
 perfil_cumplidor
+
+
+###############################################################################
+# Modelo de regresión logística
+###############################################################################
+
+# Se construye un modelo predictivo para predecir la probabilidad de cumplimiento de becarios
+# utilizando el dataframe fusion, que representa el merge entre stem y pronabec_becario
+fusion.shape
+fusion.columns
+fusion.info()
+
+# Se cuenta la cantidad de registros que tiene el campo STEM del dataframe fusion
+fusion["STEM"].count()
+
+# Se analiza la distribución de la condición STEM de los becarios tanto de programas de maestría como doctorado
+fusion.STEM.value_counts()
+fusion.STEM.value_counts(normalize=True).round(2)*100
+
+# Se analiza la distribución del campo ESTADO_DE_CSP
+fusion.ESTADO_DE_CSP.value_counts(normalize=True).round(3)*100
+
+# Se crea explicitamente la categoría "NO CUMPLIÓ", y se construye una variable booleana
+fusion["CUMPLIMIENTO_CAT"] = fusion["ESTADO_DE_CSP"].replace(
+    {
+        "PENDIENTE": "NO CUMPLIO",
+        "SIN INFORMACIÓN": "NO CUMPLIO",
+        "INCUMPLIMIENTO": "NO CUMPLIO"
+    }
+)
+
+
+fusion["CUMPLIO_BIN"] = fusion["CUMPLIMIENTO_CAT"].map(
+    {
+        "CUMPLIO": 1,
+        "NO CUMPLIO": 0
+    }
+)
+
+
+fusion.columns
+
+# En el caso de Pais de destino se agrupan por cantidad de becarios
+top_paises = (
+    fusion["PAISDESTINO"]
+    .value_counts()
+    .head(10)
+    .index
+)
+
+fusion["PAISDESTINO_GRP"] = np.where(
+    fusion["PAISDESTINO"].isin(top_paises),
+    fusion["PAISDESTINO"],
+    "OTROS"
+)
+
+
+# Se construye el dataset que permitirá hacer el análisis
+modelo = fusion[["CUMPLIO_BIN", "EDADBASES", "SEXO", "STEM", "NIVEL_EDUCATIVO", "PAISDESTINO_GRP"]]
+
+
+# Seleccionar variables
+
+df_model = modelo[
+    [
+        "CUMPLIO_BIN",
+        "EDADBASES",
+        "SEXO",
+        "STEM",
+        "NIVEL_EDUCATIVO",
+        "PAISDESTINO_GRP"
+    ]
+].copy()
+
+
+df_model = df_model.dropna()
+
+# Se revisa la variable PAISDESTINO_GRP de mi dataframe df_model
+df_model["PAISDESTINO_GRP"].value_counts()
+
+# Dado que mi objetivo es estimar la probabilidad de cumplimiento de becarios en el extranjero
+# entonces tengo que deliminar la poblicación de mi estudio
+df_model = df_model[
+    df_model["PAISDESTINO_GRP"] != "PERU"
+].copy()
+
+
+
+df_model["CUMPLIO_BIN"] = df_model["CUMPLIO_BIN"].astype(int)
+df_model["EDADBASES"] = pd.to_numeric(df_model["EDADBASES"], errors="coerce")
+df_model = df_model.dropna()
+
+
+formula = """
+CUMPLIO_BIN ~ EDADBASES
+            + C(SEXO)
+            + C(STEM)
+            + C(NIVEL_EDUCATIVO)
+            + C(PAISDESTINO_GRP, Treatment(reference='ESPAÑA'))
+"""
+
+logit_model = smf.logit(formula=formula, data=df_model).fit()
+
+print(logit_model.summary())
+
+
+params = logit_model.params
+conf = logit_model.conf_int()
+pvalues = logit_model.pvalues
+
+odds_ratios = pd.DataFrame({
+    "coeficiente": params,
+    "odds_ratio": np.exp(params),
+    "ic_95_inf": np.exp(conf[0]),
+    "ic_95_sup": np.exp(conf[1]),
+    "p_value": pvalues
+})
+
+odds_ratios = odds_ratios.sort_values("p_value")
+
+odds_ratios
+
+odds_ratios[odds_ratios["p_value"] < 0.05]
+
+
+
+
+
 
 
 
