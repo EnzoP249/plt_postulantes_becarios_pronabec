@@ -27,7 +27,7 @@ from matplotlib.colors import LinearSegmentedColormap
 import matplotlib.ticker as mticker
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
-
+from sklearn.metrics import roc_auc_score, roc_curve
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import (
     confusion_matrix,
@@ -3535,6 +3535,8 @@ fusion.STEM.value_counts()
 fusion.STEM.value_counts(normalize=True).round(2)*100
 
 # Se analiza la distribución del campo ESTADO_DE_CSP
+fusion["ESTADO_DE_CSP"].count()
+fusion.ESTADO_DE_CSP.value_counts()
 fusion.ESTADO_DE_CSP.value_counts(normalize=True).round(3)*100
 
 # Se crea explicitamente la categoría "NO CUMPLIÓ", y se construye una variable booleana
@@ -3572,6 +3574,47 @@ fusion["PAISDESTINO_GRP"] = np.where(
 )
 
 
+###############################################################################
+# Se realiza un análisis univariado
+###############################################################################
+fusion["CUMPLIO_BIN"].value_counts(normalize=True)
+fusion["STEM"].value_counts(normalize=True)
+fusion["NIVEL_EDUCATIVO"].value_counts(normalize=True)
+
+
+###############################################################################
+# Se realiza un análisis bivariado
+###############################################################################
+pd.crosstab(
+    fusion["STEM"],
+    fusion["CUMPLIO_BIN"],
+    normalize="index"
+)*100
+
+
+pd.crosstab(
+    fusion["NIVEL_EDUCATIVO"],
+    fusion["CUMPLIO_BIN"],
+    normalize="index"
+)*100
+
+
+pd.crosstab(
+    fusion["STEM"],
+    fusion["NIVEL_EDUCATIVO"],
+    normalize="index"
+)
+
+
+pd.crosstab(
+    [fusion["NIVEL_EDUCATIVO"],
+     fusion["STEM"]],
+    fusion["CUMPLIO_BIN"],
+    normalize="index"
+) * 100
+
+
+
 # Se construye el dataset que permitirá hacer el análisis
 modelo = fusion[["CUMPLIO_BIN", "EDADBASES", "SEXO", "STEM", "NIVEL_EDUCATIVO", "PAISDESTINO_GRP"]]
 
@@ -3602,11 +3645,9 @@ df_model = df_model[
 ].copy()
 
 
-
 df_model["CUMPLIO_BIN"] = df_model["CUMPLIO_BIN"].astype(int)
 df_model["EDADBASES"] = pd.to_numeric(df_model["EDADBASES"], errors="coerce")
 df_model = df_model.dropna()
-
 
 formula = """
 CUMPLIO_BIN ~ EDADBASES
@@ -3640,6 +3681,64 @@ odds_ratios
 odds_ratios[odds_ratios["p_value"] < 0.05]
 
 
+y_true = df_model["CUMPLIO_BIN"]
+
+y_prob = logit_model.predict(df_model)
+
+auc = roc_auc_score(y_true, y_prob)
+
+print(f"AUC: {auc:.3f}")
+
+
+fpr, tpr, thresholds = roc_curve(y_true, y_prob)
+
+plt.figure(figsize=(7,5))
+
+plt.plot(
+    fpr,
+    tpr,
+    linewidth=2,
+    label=f"AUC = {auc:.3f}"
+)
+
+plt.plot(
+    [0,1],
+    [0,1],
+    linestyle="--"
+)
+
+plt.xlabel("Tasa de falsos positivos")
+plt.ylabel("Tasa de verdaderos positivos")
+plt.title("Curva ROC - Modelo Logit")
+plt.legend()
+
+plt.tight_layout()
+plt.show()
+
+
+from patsy import dmatrices
+
+y, X = dmatrices(
+    formula,
+    data=df_model,
+    return_type="dataframe"
+)
+
+X.head()
+
+
+from statsmodels.stats.outliers_influence import variance_inflation_factor
+
+vif = pd.DataFrame()
+
+vif["Variable"] = X.columns
+
+vif["VIF"] = [
+    variance_inflation_factor(X.values, i)
+    for i in range(X.shape[1])
+]
+
+vif.sort_values("VIF", ascending=False)
 
 
 
@@ -3652,4 +3751,42 @@ odds_ratios[odds_ratios["p_value"] < 0.05]
 
 
 
+# =====================================================
+# Modelo con interacción STEM × Nivel educativo
+# =====================================================
 
+formula_interaccion = """
+CUMPLIO_BIN ~ EDADBASES
+            + C(SEXO)
+            + C(STEM) * C(NIVEL_EDUCATIVO)
+            + C(PAISDESTINO_GRP, Treatment(reference='ESPAÑA'))
+"""
+
+logit_interaccion = smf.logit(
+    formula=formula_interaccion,
+    data=df_model
+).fit()
+
+print(logit_interaccion.summary())
+
+# =====================================================
+# 4. Odds Ratios del modelo con interacción
+# =====================================================
+
+params = logit_interaccion.params
+conf = logit_interaccion.conf_int()
+pvalues = logit_interaccion.pvalues
+
+odds_interaccion = pd.DataFrame({
+    "coeficiente": params,
+    "odds_ratio": np.exp(params),
+    "ic_95_inf": np.exp(conf[0]),
+    "ic_95_sup": np.exp(conf[1]),
+    "p_value": pvalues
+})
+
+odds_interaccion = odds_interaccion.sort_values("p_value")
+
+odds_interaccion
+
+df_model["NIVEL_EDUCATIVO"].value_counts()
