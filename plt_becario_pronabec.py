@@ -3277,3 +3277,1456 @@ vif["VIF"] = [
 
 vif.sort_values("VIF", ascending=False)
 
+###############################################################################
+# ANALISIS PARA DETERMINAR EL INTERES POR PARTE DE BECARIOS Y NO BECARIOS
+# DE PROGRAMAS DE MAESTRIA Y DOCTORADO
+###############################################################################
+
+# Análisis considerando los postulantes a programas de maestria
+postulante_maestria.columns
+
+# Dada la naturaleza de la Beca Generación del Bicentenario no se considera a PERU
+postulante_maestria = postulante_maestria[postulante_maestria["PAISDESTINO"]!="PERU"]
+
+import numpy as np
+import pandas as pd
+from sentence_transformers import SentenceTransformer
+from sklearn.metrics.pairwise import cosine_similarity
+
+# 1. Cargar el modelo multilingüe de NLP
+model = SentenceTransformer(
+    "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+)
+
+# 2. Definir los descriptores semánticos de las 6 Áreas de la OCDE (Manual de Frascati)
+oecd_anchors = {
+    "Ingeniería y Tecnología": [
+        (
+            "Ingeniería, petroleum engineering, civil engineering, electrical"
+            " engineering"
+        ),
+        (
+            "Tecnología, biotecnología, computer science, informática, datos,"
+            " logística"
+        ),
+        "Ingeniería en petróleo, gas natural, acústica, estructuras, geotecnia",
+    ],
+    "Ciencias Naturales": [
+        (
+            "Ciencias naturales, biología, química, física, matemáticas,"
+            " geología"
+        ),
+        (
+            "Biodiversidad, ecología, ciencias ambientales, medio ambiente,"
+            " paisajes"
+        ),
+    ],
+    "Ciencias Agrícolas y Veterinarias": [
+        (
+            "Agronomía, agronegocios, agricultura, silvicultura, pesca,"
+            " veterinaria"
+        ),
+        "Ciencia de los alimentos, inocuidad alimentaria, gestión agrícola",
+    ],
+    "Ciencias Sociales": [
+        (
+            "Administración, economía, desarrollo, educación, ciencias"
+            " políticas"
+        ),
+        "Derecho, sociología, finanzas, gestión pública, defensa, negocios",
+    ],
+    "Ciencias Médicas y de la Salud": [
+        (
+            "Medicina, salud pública, enfermería, farmacia, odontología,"
+            " psicología clínica"
+        )
+    ],
+    "Humanidades": [
+        "Historia, filosofía, literatura, lingüística, arte, teología"
+    ],
+}
+
+# 3. Precalcular los embeddings base para las categorías
+cat_names = list(oecd_anchors.keys())
+cat_embeddings = []
+
+for cat in cat_names:
+  embeds = model.encode(oecd_anchors[cat])
+  cat_embeddings.append(np.mean(embeds, axis=0))
+
+cat_embeddings = np.array(cat_embeddings)
+
+
+# 4. Función vectorizada optimizada para datasets de 10,000+ filas
+def clasificar_dataset_ocde(df, columna_nombre="NOMBRECARRERA", batch_size=64):
+  print(f"Procesando {len(df)} filas...")
+
+  # Preparar los textos (manejar nulos y convertir a string)
+  textos = df[columna_nombre].fillna("").astype(str).tolist()
+
+  # Paso A: Generar Embeddings masivamente en lotes (batch)
+  text_embeddings = model.encode(
+      textos, batch_size=batch_size, show_progress_bar=True
+  )
+
+  # Paso B: Calcular Similitud Coseno de forma matricial
+  sim_matrix = cosine_similarity(text_embeddings, cat_embeddings)
+
+  # Asignar la categoría con mayor puntuación semántica
+  mejores_indices = np.argmax(sim_matrix, axis=1)
+  df["AREA_OCDE"] = [cat_names[i] for i in mejores_indices]
+
+  # Paso C: Aplicar Reglas Jerárquicas Directas (Evita errores en términos ambiguos)
+  patron_ing = r"INGENIERIA|ENGINEERING|ENGENHARIA"
+  patron_agro = r"AGRONEGOCIO|AGRONOM"
+
+  mask_ing = df[columna_nombre].str.contains(patron_ing, case=False, na=False)
+  mask_agro = df[columna_nombre].str.contains(
+      patron_agro, case=False, na=False
+  )
+
+  df.loc[mask_ing, "AREA_OCDE"] = "Ingeniería y Tecnología"
+  df.loc[mask_agro, "AREA_OCDE"] = "Ciencias Agrícolas y Veterinarias"
+
+  return df
+
+
+# --- EJECUCIÓN CON TU DATAFRAME ---
+# Suponiendo que tu DataFrame se llama `df`:
+postulante_maestria = clasificar_dataset_ocde(postulante_maestria, columna_nombre="NOMBRECARRERA")
+postulante_maestria.columns
+
+# Se realiza una auditoria manual de los resultados para una mayor precisión
+postulante_maestria.to_excel("postulante_maestria_pronabec.xlsx")
+
+# Se vuelve a cargar la base de datos de postulantes de maestria
+postulante_maestria_excel = pd.read_excel("postulante_maestria_pronabec.xlsx", sheet_name="Sheet1", header=0, converters=converters)
+
+# Considero a los postulantes que obtuvieron la beca
+beca_maestria = postulante_maestria_excel[postulante_maestria_excel["CONDICION_FINAL"]=="SE LE ADJUDICÓ LA BECA"]
+beca_maestria = beca_maestria[["AÑO_CONVOCATORIA", "SEXO", "EDADBASES", "NOMBRECARRERA", "AREA_OCDE"]]
+
+# Se considera los becarios mayores de 18 años
+beca_maestria = beca_maestria[beca_maestria["EDADBASES"]>=18]
+
+# Se calcula una distribución historica
+distribucion_maestria = beca_maestria.AREA_OCDE.value_counts(normalize=True).round(2)*100
+distribucion_maestria = distribucion_maestria.to_frame()
+distribucion_maestria.reset_index(inplace=True)
+distribucion_maestria.rename(columns=({"proportion":"Porcentaje"}), inplace=True)
+
+
+# Configuración del estilo de la figura
+plt.figure(figsize=(12, 6))
+sns.set_theme(style='whitegrid')
+
+# Creación del gráfico de barras horizontales
+ax = sns.barplot(
+    data=distribucion_maestria,
+    x='Porcentaje',
+    y='AREA_OCDE',
+    palette='magma',  # Paleta de colores similar a la de tu imagen
+)
+
+# Añadir los valores percentuales al final de cada barra
+for p in ax.patches:
+    width = p.get_width()
+    ax.annotate(
+        f'{width:.0f}%',
+        (width, p.get_y() + p.get_height() / 2.0),
+        ha='left',
+        va='center',
+        xytext=(5, 0),
+        textcoords='offset points',
+        fontsize=16,
+        fontweight='bold',
+    )
+
+
+ax.tick_params(axis='x', labelsize=14, labelcolor='black')  # Valores del eje X
+ax.tick_params(
+    axis='y', labelsize=14, labelcolor='#222222'
+)  # Categorías del eje Y
+
+# Títulos y etiquetas
+#plt.title(
+    #'Distribución Porcentual por Área OCDE', fontsize=14, fontweight='bold', pad=15
+#)
+plt.xlabel('Porcentaje (%)', fontsize=16)
+plt.ylabel('Área OCDE', fontsize=16)
+
+# Ajuste de límites para dejar espacio a las etiquetas del %
+plt.xlim(0, max(distribucion_maestria['Porcentaje']) * 1.15)
+plt.tight_layout()
+
+# Mostrar gráfico
+plt.show()
+
+
+###############################################################################
+# Considerando la edad de los becarios de programas de maestria
+###############################################################################
+
+# Se elabora un analísis descriptivo de la variable edadbases
+beca_maestria["EDADBASES"].describe()
+
+
+# 1. Crear los rangos de edad
+bins = [19, 29, 39, 120]
+labels = ['20 - 29 años', '30 - 39 años', '40 - 50 años']
+beca_maestria['RANGO_EDAD'] = pd.cut(
+    beca_maestria['EDADBASES'], bins=bins, labels=labels, right=True
+)
+
+# 2. Calcular porcentajes por cada rango de edad
+df_grouped = (
+    beca_maestria.groupby(['RANGO_EDAD', 'AREA_OCDE'], observed=False)
+    .size()
+    .unstack(fill_value=0)
+)
+df_pct = df_grouped.div(df_grouped.sum(axis=1), axis=0) * 100
+df_plot = df_pct.reset_index().melt(
+    id_vars='RANGO_EDAD', var_name='AREA_OCDE', value_name='Porcentaje'
+)
+
+
+# Configuración de fondo
+plt.figure(figsize=(14, 6))
+sns.set_theme(style='whitegrid')
+
+# Uso de paleta cualitativa 'Set2' para máxima distinción visual
+ax = sns.barplot(
+    data=df_plot,
+    x='RANGO_EDAD',
+    y='Porcentaje',
+    hue='AREA_OCDE',
+    palette='Set2',  # O 'tab10', 'Paired', 'Set1'
+)
+
+# Etiquetas de valores sobre cada barra
+for p in ax.patches:
+    height = p.get_height()
+    if height > 0:
+        ax.annotate(
+            f'{height:.1f}%',
+            (p.get_x() + p.get_width() / 2.0, height),
+            ha='center',
+            va='bottom',
+            xytext=(0, 3),
+            textcoords='offset points',
+            fontsize=11,
+            fontweight='bold',
+        )
+
+# Formato de títulos y ejes
+ax.set_xlabel('Rango de Edad', fontsize=12, fontweight='bold', labelpad=10)
+ax.set_ylabel(
+    'Porcentaje (%) por Área OCDE', fontsize=12, fontweight='bold', labelpad=10
+)
+
+
+plt.legend(
+    title='Área OCDE',
+    loc='upper center',
+    bbox_to_anchor=(0.5, -0.15),
+    ncol=3,               # Distribuye los elementos en 3 columnas
+    fontsize=8.5,
+    title_fontsize=9.5,
+    frameon=True
+)
+
+###############################################################################
+# Considerando el género de los becarios de programas de maestría
+###############################################################################
+
+# 1. Calcular porcentajes agrupando por la columna SEXO
+df_grouped_sex = (
+    beca_maestria.groupby(['SEXO', 'AREA_OCDE'], observed=False)
+    .size()
+    .unstack(fill_value=0)
+)
+df_pct_sex = df_grouped_sex.div(df_grouped_sex.sum(axis=1), axis=0) * 100
+df_plot_sex = df_pct_sex.reset_index().melt(
+    id_vars='SEXO', var_name='AREA_OCDE', value_name='Porcentaje'
+)
+
+# 2. Configurar figura y tema
+plt.figure(figsize=(10, 6))
+sns.set_theme(style='whitegrid')
+
+# 3. Dibujar barras con paleta cualitativa
+ax = sns.barplot(
+    data=df_plot_sex,
+    x='SEXO',
+    y='Porcentaje',
+    hue='AREA_OCDE',
+    palette='Set2',
+)
+
+# 4. Agregar etiquetas de porcentaje sobre cada barra
+for p in ax.patches:
+    height = p.get_height()
+    if height > 0:
+        ax.annotate(
+            f'{height:.1f}%',
+            (p.get_x() + p.get_width() / 2.0, height),
+            ha='center',
+            va='bottom',
+            xytext=(0, 3),
+            textcoords='offset points',
+            fontsize=11,
+            fontweight='bold',
+        )
+
+# 5. Formato de ejes y leyenda compacta
+ax.set_xlabel('Género', fontsize=12, fontweight='bold', labelpad=10)
+ax.set_ylabel(
+    'Porcentaje (%) por Área OCDE', fontsize=12, fontweight='bold', labelpad=10
+)
+
+plt.legend(
+    title='Área OCDE',
+    bbox_to_anchor=(1.02, 1),
+    loc='upper left',
+    fontsize=8,
+    title_fontsize=9,
+    labelspacing=0.35,
+    handletextpad=0.4,
+    borderpad=0.4,
+)
+
+plt.ylim(0, max(df_plot_sex['Porcentaje']) * 1.18)
+plt.tight_layout()
+
+plt.show()
+
+###############################################################################
+###############################################################################
+# SE ELABORA UN ANÁLISIS PARA LOS DOS ULTIMOS AÑOS 2024 - 2025
+###############################################################################
+###############################################################################
+
+# Se considera solo los ultimos dos años 2024 - 2025
+df_2024_2025 = beca_maestria[beca_maestria["AÑO_CONVOCATORIA"].isin([2024, 2025])].copy()
+
+# Se calcula una distribución historica
+distribucion_maestria = df_2024_2025.AREA_OCDE.value_counts(normalize=True).round(2)*100
+distribucion_maestria = distribucion_maestria.to_frame()
+distribucion_maestria.reset_index(inplace=True)
+distribucion_maestria.rename(columns=({"proportion":"Porcentaje"}), inplace=True)
+
+
+# Configuración del estilo de la figura
+plt.figure(figsize=(12, 6))
+sns.set_theme(style='whitegrid')
+
+# Creación del gráfico de barras horizontales
+ax = sns.barplot(
+    data=distribucion_maestria,
+    x='Porcentaje',
+    y='AREA_OCDE',
+    palette='magma',  # Paleta de colores similar a la de tu imagen
+)
+
+# Añadir los valores percentuales al final de cada barra
+for p in ax.patches:
+    width = p.get_width()
+    ax.annotate(
+        f'{width:.0f}%',
+        (width, p.get_y() + p.get_height() / 2.0),
+        ha='left',
+        va='center',
+        xytext=(5, 0),
+        textcoords='offset points',
+        fontsize=16,
+        fontweight='bold',
+    )
+
+
+ax.tick_params(axis='x', labelsize=14, labelcolor='black')  # Valores del eje X
+ax.tick_params(
+    axis='y', labelsize=14, labelcolor='#222222'
+)  # Categorías del eje Y
+
+# Títulos y etiquetas
+#plt.title(
+    #'Distribución Porcentual por Área OCDE', fontsize=14, fontweight='bold', pad=15
+#)
+plt.xlabel('Porcentaje (%)', fontsize=16)
+plt.ylabel('Área OCDE', fontsize=16)
+
+# Ajuste de límites para dejar espacio a las etiquetas del %
+plt.xlim(0, max(distribucion_maestria['Porcentaje']) * 1.15)
+plt.tight_layout()
+
+# Mostrar gráfico
+plt.show()
+
+
+###############################################################################
+# Considerando la edad de los becarios de programas de maestria de los dos
+# últimos años (2024, 2025)
+###############################################################################
+
+# Se elabora un analísis descriptivo de la variable edadbases
+df_2024_2025["EDADBASES"].describe()
+
+
+# 1. Crear los rangos de edad
+bins = [19, 29, 39, 120]
+labels = ['20 - 29 años', '30 - 39 años', '40 - 50 años']
+df_2024_2025['RANGO_EDAD'] = pd.cut(
+    df_2024_2025['EDADBASES'], bins=bins, labels=labels, right=True
+)
+
+# 2. Calcular porcentajes por cada rango de edad
+df_grouped = (
+    df_2024_2025.groupby(['RANGO_EDAD', 'AREA_OCDE'], observed=False)
+    .size()
+    .unstack(fill_value=0)
+)
+df_pct = df_grouped.div(df_grouped.sum(axis=1), axis=0) * 100
+df_plot = df_pct.reset_index().melt(
+    id_vars='RANGO_EDAD', var_name='AREA_OCDE', value_name='Porcentaje'
+)
+
+
+# Configuración de fondo
+plt.figure(figsize=(14, 6))
+sns.set_theme(style='whitegrid')
+
+# Uso de paleta cualitativa 'Set2' para máxima distinción visual
+ax = sns.barplot(
+    data=df_plot,
+    x='RANGO_EDAD',
+    y='Porcentaje',
+    hue='AREA_OCDE',
+    palette='Set2',  # O 'tab10', 'Paired', 'Set1'
+)
+
+# Etiquetas de valores sobre cada barra
+for p in ax.patches:
+    height = p.get_height()
+    if height > 0:
+        ax.annotate(
+            f'{height:.1f}%',
+            (p.get_x() + p.get_width() / 2.0, height),
+            ha='center',
+            va='bottom',
+            xytext=(0, 3),
+            textcoords='offset points',
+            fontsize=11,
+            fontweight='bold',
+        )
+
+# Formato de títulos y ejes
+ax.set_xlabel('Rango de Edad', fontsize=12, fontweight='bold', labelpad=10)
+ax.set_ylabel(
+    'Porcentaje (%) por Área OCDE', fontsize=12, fontweight='bold', labelpad=10
+)
+
+
+plt.legend(
+    title='Área OCDE',
+    loc='upper center',
+    bbox_to_anchor=(0.5, -0.15),
+    ncol=3,               # Distribuye los elementos en 3 columnas
+    fontsize=8.5,
+    title_fontsize=9.5,
+    frameon=True
+)
+
+###############################################################################
+# Considerando el género de los becarios de programas de maestría de 
+# los dos últimos años (2024, 2025)
+###############################################################################
+
+# 1. Calcular porcentajes agrupando por la columna SEXO
+df_grouped_sex = (
+    df_2024_2025.groupby(['SEXO', 'AREA_OCDE'], observed=False)
+    .size()
+    .unstack(fill_value=0)
+)
+df_pct_sex = df_grouped_sex.div(df_grouped_sex.sum(axis=1), axis=0) * 100
+df_plot_sex = df_pct_sex.reset_index().melt(
+    id_vars='SEXO', var_name='AREA_OCDE', value_name='Porcentaje'
+)
+
+# 2. Configurar figura y tema
+plt.figure(figsize=(10, 6))
+sns.set_theme(style='whitegrid')
+
+# 3. Dibujar barras con paleta cualitativa
+ax = sns.barplot(
+    data=df_plot_sex,
+    x='SEXO',
+    y='Porcentaje',
+    hue='AREA_OCDE',
+    palette='Set2',
+)
+
+# 4. Agregar etiquetas de porcentaje sobre cada barra
+for p in ax.patches:
+    height = p.get_height()
+    if height > 0:
+        ax.annotate(
+            f'{height:.1f}%',
+            (p.get_x() + p.get_width() / 2.0, height),
+            ha='center',
+            va='bottom',
+            xytext=(0, 3),
+            textcoords='offset points',
+            fontsize=11,
+            fontweight='bold',
+        )
+
+# 5. Formato de ejes y leyenda compacta
+ax.set_xlabel('Género', fontsize=12, fontweight='bold', labelpad=10)
+ax.set_ylabel(
+    'Porcentaje (%) por Área OCDE', fontsize=12, fontweight='bold', labelpad=10
+)
+
+plt.legend(
+    title='Área OCDE',
+    bbox_to_anchor=(1.02, 1),
+    loc='upper left',
+    fontsize=8,
+    title_fontsize=9,
+    labelspacing=0.35,
+    handletextpad=0.4,
+    borderpad=0.4,
+)
+
+plt.ylim(0, max(df_plot_sex['Porcentaje']) * 1.18)
+plt.tight_layout()
+
+plt.show()
+
+
+###############################################################################
+###############################################################################
+# SE REALIZA UN ANÁLISIS PARA LOS POSTULANTES QUE NO OBTUVIERON LA BECA DE MAESTRIA
+###############################################################################
+###############################################################################
+
+# Considero a los postulantes que no obtuvieron la beca
+beca_no_maestria = postulante_maestria_excel[postulante_maestria_excel["CONDICION_FINAL"]=="NO SE LE ADJUDICÓ LA BECA"]
+beca_no_maestria = beca_no_maestria[["AÑO_CONVOCATORIA", "SEXO", "EDADBASES", "NOMBRECARRERA", "AREA_OCDE"]]
+
+# Se considera los no becarios mayores de 18 años
+beca_no_maestria = beca_no_maestria[beca_no_maestria["EDADBASES"]>=18]
+
+# Se calcula una distribución historica
+distribucion_maestria = beca_no_maestria.AREA_OCDE.value_counts(normalize=True).round(2)*100
+distribucion_maestria = distribucion_maestria.to_frame()
+distribucion_maestria.reset_index(inplace=True)
+distribucion_maestria.rename(columns=({"proportion":"Porcentaje"}), inplace=True)
+
+
+# Configuración del estilo de la figura
+plt.figure(figsize=(12, 6))
+sns.set_theme(style='whitegrid')
+
+# Creación del gráfico de barras horizontales
+ax = sns.barplot(
+    data=distribucion_maestria,
+    x='Porcentaje',
+    y='AREA_OCDE',
+    palette='magma',  # Paleta de colores similar a la de tu imagen
+)
+
+# Añadir los valores percentuales al final de cada barra
+for p in ax.patches:
+    width = p.get_width()
+    ax.annotate(
+        f'{width:.0f}%',
+        (width, p.get_y() + p.get_height() / 2.0),
+        ha='left',
+        va='center',
+        xytext=(5, 0),
+        textcoords='offset points',
+        fontsize=16,
+        fontweight='bold',
+    )
+
+
+ax.tick_params(axis='x', labelsize=14, labelcolor='black')  # Valores del eje X
+ax.tick_params(
+    axis='y', labelsize=14, labelcolor='#222222'
+)  # Categorías del eje Y
+
+# Títulos y etiquetas
+#plt.title(
+    #'Distribución Porcentual por Área OCDE', fontsize=14, fontweight='bold', pad=15
+#)
+plt.xlabel('Porcentaje', fontsize=16)
+plt.ylabel('Área OCDE', fontsize=16)
+
+# Ajuste de límites para dejar espacio a las etiquetas del %
+plt.xlim(0, max(distribucion_maestria['Porcentaje']) * 1.15)
+plt.tight_layout()
+
+# Mostrar gráfico
+plt.show()
+
+
+###############################################################################
+# Considerando la edad de los becarios de programas de maestria
+###############################################################################
+
+# Se elabora un analísis descriptivo de la variable edadbases
+beca_maestria["EDADBASES"].describe()
+
+
+# 1. Crear los rangos de edad
+bins = [19, 29, 39, 120]
+labels = ['20 - 29 años', '30 - 39 años', '40 a más años']
+beca_maestria['RANGO_EDAD'] = pd.cut(
+    beca_maestria['EDADBASES'], bins=bins, labels=labels, right=True
+)
+
+# 2. Calcular porcentajes por cada rango de edad
+df_grouped = (
+    beca_maestria.groupby(['RANGO_EDAD', 'AREA_OCDE'], observed=False)
+    .size()
+    .unstack(fill_value=0)
+)
+df_pct = df_grouped.div(df_grouped.sum(axis=1), axis=0) * 100
+df_plot = df_pct.reset_index().melt(
+    id_vars='RANGO_EDAD', var_name='AREA_OCDE', value_name='Porcentaje'
+)
+
+
+# Configuración de fondo
+plt.figure(figsize=(14, 6))
+sns.set_theme(style='whitegrid')
+
+# Uso de paleta cualitativa 'Set2' para máxima distinción visual
+ax = sns.barplot(
+    data=df_plot,
+    x='RANGO_EDAD',
+    y='Porcentaje',
+    hue='AREA_OCDE',
+    palette='Set2',  # O 'tab10', 'Paired', 'Set1'
+)
+
+# Etiquetas de valores sobre cada barra
+for p in ax.patches:
+    height = p.get_height()
+    if height > 0:
+        ax.annotate(
+            f'{height:.1f}%',
+            (p.get_x() + p.get_width() / 2.0, height),
+            ha='center',
+            va='bottom',
+            xytext=(0, 3),
+            textcoords='offset points',
+            fontsize=11,
+            fontweight='bold',
+        )
+
+# Formato de títulos y ejes
+ax.set_xlabel('Rango de Edad', fontsize=12, fontweight='bold', labelpad=10)
+ax.set_ylabel(
+    'Porcentaje (%) por Área OCDE', fontsize=12, fontweight='bold', labelpad=10
+)
+
+
+plt.legend(
+    title='Área OCDE',
+    loc='upper center',
+    bbox_to_anchor=(0.5, -0.15),
+    ncol=3,               # Distribuye los elementos en 3 columnas
+    fontsize=8.5,
+    title_fontsize=9.5,
+    frameon=True
+)
+
+###############################################################################
+# Considerando el género de los becarios de programas de maestría
+###############################################################################
+
+# 1. Calcular porcentajes agrupando por la columna SEXO
+df_grouped_sex = (
+    beca_maestria.groupby(['SEXO', 'AREA_OCDE'], observed=False)
+    .size()
+    .unstack(fill_value=0)
+)
+df_pct_sex = df_grouped_sex.div(df_grouped_sex.sum(axis=1), axis=0) * 100
+df_plot_sex = df_pct_sex.reset_index().melt(
+    id_vars='SEXO', var_name='AREA_OCDE', value_name='Porcentaje'
+)
+
+# 2. Configurar figura y tema
+plt.figure(figsize=(10, 6))
+sns.set_theme(style='whitegrid')
+
+# 3. Dibujar barras con paleta cualitativa
+ax = sns.barplot(
+    data=df_plot_sex,
+    x='SEXO',
+    y='Porcentaje',
+    hue='AREA_OCDE',
+    palette='Set2',
+)
+
+# 4. Agregar etiquetas de porcentaje sobre cada barra
+for p in ax.patches:
+    height = p.get_height()
+    if height > 0:
+        ax.annotate(
+            f'{height:.1f}%',
+            (p.get_x() + p.get_width() / 2.0, height),
+            ha='center',
+            va='bottom',
+            xytext=(0, 3),
+            textcoords='offset points',
+            fontsize=11,
+            fontweight='bold',
+        )
+
+# 5. Formato de ejes y leyenda compacta
+ax.set_xlabel('Género (SEXO)', fontsize=12, fontweight='bold', labelpad=10)
+ax.set_ylabel(
+    'Porcentaje (%) por Área OCDE', fontsize=12, fontweight='bold', labelpad=10
+)
+
+plt.legend(
+    title='Área OCDE',
+    bbox_to_anchor=(1.02, 1),
+    loc='upper left',
+    fontsize=8,
+    title_fontsize=9,
+    labelspacing=0.35,
+    handletextpad=0.4,
+    borderpad=0.4,
+)
+
+plt.ylim(0, max(df_plot_sex['Porcentaje']) * 1.18)
+plt.tight_layout()
+
+plt.show()
+
+###############################################################################
+###############################################################################
+# SE REALIZA UN ANALISIS PARA EL CASO DE LOS BECARIOS DE PROGRAMAS DE DOCTORADO
+###############################################################################
+###############################################################################
+postulante_doctorado.columns
+
+# Dada la naturaleza de la Beca Generación del Bicentenario no se considera a PERU
+postulante_doctorado = postulante_doctorado[postulante_doctorado["PAISDESTINO"]!="PERU"]
+
+# 1. Cargar el modelo multilingüe de NLP
+model = SentenceTransformer(
+    "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+)
+
+# 2. Definir los descriptores semánticos de las 6 Áreas de la OCDE (Manual de Frascati)
+oecd_anchors = {
+    "Ingeniería y Tecnología": [
+        (
+            "Ingeniería, petroleum engineering, civil engineering, electrical"
+            " engineering"
+        ),
+        (
+            "Tecnología, biotecnología, computer science, informática, datos,"
+            " logística"
+        ),
+        "Ingeniería en petróleo, gas natural, acústica, estructuras, geotecnia",
+    ],
+    "Ciencias Naturales": [
+        (
+            "Ciencias naturales, biología, química, física, matemáticas,"
+            " geología"
+        ),
+        (
+            "Biodiversidad, ecología, ciencias ambientales, medio ambiente,"
+            " paisajes"
+        ),
+    ],
+    "Ciencias Agrícolas y Veterinarias": [
+        (
+            "Agronomía, agronegocios, agricultura, silvicultura, pesca,"
+            " veterinaria"
+        ),
+        "Ciencia de los alimentos, inocuidad alimentaria, gestión agrícola",
+    ],
+    "Ciencias Sociales": [
+        (
+            "Administración, economía, desarrollo, educación, ciencias"
+            " políticas"
+        ),
+        "Derecho, sociología, finanzas, gestión pública, defensa, negocios",
+    ],
+    "Ciencias Médicas y de la Salud": [
+        (
+            "Medicina, salud pública, enfermería, farmacia, odontología,"
+            " psicología clínica"
+        )
+    ],
+    "Humanidades": [
+        "Historia, filosofía, literatura, lingüística, arte, teología"
+    ],
+}
+
+# 3. Precalcular los embeddings base para las categorías
+cat_names = list(oecd_anchors.keys())
+cat_embeddings = []
+
+for cat in cat_names:
+  embeds = model.encode(oecd_anchors[cat])
+  cat_embeddings.append(np.mean(embeds, axis=0))
+
+cat_embeddings = np.array(cat_embeddings)
+
+
+# 4. Función vectorizada optimizada para datasets de 10,000+ filas
+def clasificar_dataset_ocde(df, columna_nombre="NOMBRECARRERA", batch_size=64):
+  print(f"Procesando {len(df)} filas...")
+
+  # Preparar los textos (manejar nulos y convertir a string)
+  textos = df[columna_nombre].fillna("").astype(str).tolist()
+
+  # Paso A: Generar Embeddings masivamente en lotes (batch)
+  text_embeddings = model.encode(
+      textos, batch_size=batch_size, show_progress_bar=True
+  )
+
+  # Paso B: Calcular Similitud Coseno de forma matricial
+  sim_matrix = cosine_similarity(text_embeddings, cat_embeddings)
+
+  # Asignar la categoría con mayor puntuación semántica
+  mejores_indices = np.argmax(sim_matrix, axis=1)
+  df["AREA_OCDE"] = [cat_names[i] for i in mejores_indices]
+
+  # Paso C: Aplicar Reglas Jerárquicas Directas (Evita errores en términos ambiguos)
+  patron_ing = r"INGENIERIA|ENGINEERING|ENGENHARIA"
+  patron_agro = r"AGRONEGOCIO|AGRONOM"
+
+  mask_ing = df[columna_nombre].str.contains(patron_ing, case=False, na=False)
+  mask_agro = df[columna_nombre].str.contains(
+      patron_agro, case=False, na=False
+  )
+
+  df.loc[mask_ing, "AREA_OCDE"] = "Ingeniería y Tecnología"
+  df.loc[mask_agro, "AREA_OCDE"] = "Ciencias Agrícolas y Veterinarias"
+
+  return df
+
+
+# --- EJECUCIÓN CON TU DATAFRAME ---
+# Suponiendo que tu DataFrame se llama `df`:
+postulante_doctorado = clasificar_dataset_ocde(postulante_doctorado, columna_nombre="NOMBRECARRERA")
+postulante_doctorado.columns
+
+# Se realiza una auditoria manual de los resultados para una mayor precisión
+postulante_doctorado.to_excel("postulante_doctorado_pronabec.xlsx")
+
+# Se vuelve a cargar la base de datos de postulantes de maestria
+postulante_doctorado_excel = pd.read_excel("postulante_doctorado_pronabec.xlsx", sheet_name="Sheet1", header=0, converters=converters)
+
+# Considero a los postulantes de doctorado que obtuvieron la beca
+beca_doctorado = postulante_doctorado_excel[postulante_doctorado_excel["CONDICION_FINAL"]=="SE LE ADJUDICÓ LA BECA"]
+beca_doctorado = beca_doctorado[["AÑO_CONVOCATORIA", "SEXO", "EDADBASES", "NOMBRECARRERA", "AREA_OCDE"]]
+
+# Se calcula una distribución historica
+distribucion_doctorado = beca_doctorado.AREA_OCDE.value_counts(normalize=True).round(2)*100
+distribucion_doctorado = distribucion_doctorado.to_frame()
+distribucion_doctorado.reset_index(inplace=True)
+distribucion_doctorado.rename(columns=({"proportion":"Porcentaje"}), inplace=True)
+
+
+# Configuración del estilo de la figura
+plt.figure(figsize=(12, 6))
+sns.set_theme(style='whitegrid')
+
+# Creación del gráfico de barras horizontales
+ax = sns.barplot(
+    data=distribucion_doctorado,
+    x='Porcentaje',
+    y='AREA_OCDE',
+    palette='rocket',  # Paleta de colores similar a la de tu imagen
+)
+
+# Añadir los valores percentuales al final de cada barra
+for p in ax.patches:
+    width = p.get_width()
+    ax.annotate(
+        f'{width:.0f}%',
+        (width, p.get_y() + p.get_height() / 2.0),
+        ha='left',
+        va='center',
+        xytext=(5, 0),
+        textcoords='offset points',
+        fontsize=16,
+        fontweight='bold',
+    )
+
+
+ax.tick_params(axis='x', labelsize=14, labelcolor='black')  # Valores del eje X
+ax.tick_params(
+    axis='y', labelsize=14, labelcolor='#222222'
+)  # Categorías del eje Y
+
+# Títulos y etiquetas
+#plt.title(
+    #'Distribución Porcentual por Área OCDE', fontsize=14, fontweight='bold', pad=15
+#)
+plt.xlabel('Porcentaje', fontsize=16)
+plt.ylabel('Área OCDE', fontsize=16)
+
+# Ajuste de límites para dejar espacio a las etiquetas del %
+plt.xlim(0, max(distribucion_maestria['Porcentaje']) * 1.15)
+plt.tight_layout()
+
+# Mostrar gráfico
+plt.show()
+
+
+###############################################################################
+# Considerando la edad de los becarios de programas de doctorado
+###############################################################################
+
+# Se elabora un analísis descriptivo de la variable edadbases
+beca_doctorado["EDADBASES"].describe()
+beca_doctorado["EDADBASES"].describe()
+
+# 1. Crear los rangos de edad
+bins = [23, 33, 42, 100]
+labels = ['23 - 33 años', '33 - 42 años', '42 - 55 años']
+beca_doctorado['RANGO_EDAD'] = pd.cut(
+    beca_doctorado['EDADBASES'], bins=bins, labels=labels, right=True
+)
+
+# 2. Calcular porcentajes por cada rango de edad
+df_grouped = (
+    beca_doctorado.groupby(['RANGO_EDAD', 'AREA_OCDE'], observed=False)
+    .size()
+    .unstack(fill_value=0)
+)
+df_pct = df_grouped.div(df_grouped.sum(axis=1), axis=0) * 100
+df_plot = df_pct.reset_index().melt(
+    id_vars='RANGO_EDAD', var_name='AREA_OCDE', value_name='Porcentaje'
+)
+
+
+# Configuración de fondo
+plt.figure(figsize=(14, 6))
+sns.set_theme(style='whitegrid')
+
+# Uso de paleta cualitativa 'Set2' para máxima distinción visual
+ax = sns.barplot(
+    data=df_plot,
+    x='RANGO_EDAD',
+    y='Porcentaje',
+    hue='AREA_OCDE',
+    palette='Set2',  # O 'tab10', 'Paired', 'Set1'
+)
+
+# Etiquetas de valores sobre cada barra
+for p in ax.patches:
+    height = p.get_height()
+    if height > 0:
+        ax.annotate(
+            f'{height:.1f}%',
+            (p.get_x() + p.get_width() / 2.0, height),
+            ha='center',
+            va='bottom',
+            xytext=(0, 3),
+            textcoords='offset points',
+            fontsize=11,
+            fontweight='bold',
+        )
+
+# Formato de títulos y ejes
+ax.set_xlabel('Rango de Edad', fontsize=12, fontweight='bold', labelpad=10)
+ax.set_ylabel(
+    'Porcentaje (%) por Área OCDE', fontsize=12, fontweight='bold', labelpad=10
+)
+
+
+plt.legend(
+    title='Área OCDE',
+    loc='upper center',
+    bbox_to_anchor=(0.5, -0.15),
+    ncol=3,               # Distribuye los elementos en 3 columnas
+    fontsize=8.5,
+    title_fontsize=9.5,
+    frameon=True
+)
+
+###############################################################################
+# Considerando el género de los becarios de programas de doctorado
+###############################################################################
+
+# 1. Calcular porcentajes agrupando por la columna SEXO
+df_grouped_sex = (
+    beca_doctorado.groupby(['SEXO', 'AREA_OCDE'], observed=False)
+    .size()
+    .unstack(fill_value=0)
+)
+df_pct_sex = df_grouped_sex.div(df_grouped_sex.sum(axis=1), axis=0) * 100
+df_plot_sex = df_pct_sex.reset_index().melt(
+    id_vars='SEXO', var_name='AREA_OCDE', value_name='Porcentaje'
+)
+
+# 2. Configurar figura y tema
+plt.figure(figsize=(10, 6))
+sns.set_theme(style='whitegrid')
+
+# 3. Dibujar barras con paleta cualitativa
+ax = sns.barplot(
+    data=df_plot_sex,
+    x='SEXO',
+    y='Porcentaje',
+    hue='AREA_OCDE',
+    palette='Set2',
+)
+
+# 4. Agregar etiquetas de porcentaje sobre cada barra
+for p in ax.patches:
+    height = p.get_height()
+    if height > 0:
+        ax.annotate(
+            f'{height:.1f}%',
+            (p.get_x() + p.get_width() / 2.0, height),
+            ha='center',
+            va='bottom',
+            xytext=(0, 3),
+            textcoords='offset points',
+            fontsize=11,
+            fontweight='bold',
+        )
+
+# 5. Formato de ejes y leyenda compacta
+ax.set_xlabel('Género (SEXO)', fontsize=12, fontweight='bold', labelpad=10)
+ax.set_ylabel(
+    'Porcentaje (%) por Área OCDE', fontsize=12, fontweight='bold', labelpad=10
+)
+
+plt.legend(
+    title='Área OCDE',
+    bbox_to_anchor=(1.02, 1),
+    loc='upper left',
+    fontsize=8,
+    title_fontsize=9,
+    labelspacing=0.35,
+    handletextpad=0.4,
+    borderpad=0.4,
+)
+
+plt.ylim(0, max(df_plot_sex['Porcentaje']) * 1.18)
+plt.tight_layout()
+
+plt.show()
+
+###############################################################################
+###############################################################################
+# SE ELABORA UN ANÁLISIS PARA LOS DOS ULTIMOS AÑOS 2024 - 2025
+###############################################################################
+###############################################################################
+
+# Se considera solo los ultimos dos años 2024 - 2025
+df_2024_2025 = beca_doctorado[beca_doctorado["AÑO_CONVOCATORIA"].isin([2024, 2025])].copy()
+
+# Se calcula una distribución historica
+distribucion_maestria = df_2024_2025.AREA_OCDE.value_counts()
+distribucion_maestria = distribucion_maestria.to_frame()
+distribucion_maestria.reset_index(inplace=True)
+distribucion_maestria.rename(columns=({"count":"Cantidad"}), inplace=True)
+
+
+# Configuración del estilo de la figura
+plt.figure(figsize=(12, 6))
+sns.set_theme(style='whitegrid')
+
+# Creación del gráfico de barras horizontales
+ax = sns.barplot(
+    data=distribucion_maestria,
+    x='Cantidad',
+    y='AREA_OCDE',
+    palette='magma',  # Paleta de colores similar a la de tu imagen
+)
+
+# Añadir los valores percentuales al final de cada barra
+for p in ax.patches:
+    width = p.get_width()
+    ax.annotate(
+        f'{width:.0f}',
+        (width, p.get_y() + p.get_height() / 2.0),
+        ha='left',
+        va='center',
+        xytext=(5, 0),
+        textcoords='offset points',
+        fontsize=16,
+        fontweight='bold',
+    )
+
+
+ax.tick_params(axis='x', labelsize=14, labelcolor='black')  # Valores del eje X
+ax.tick_params(
+    axis='y', labelsize=14, labelcolor='#222222'
+)  # Categorías del eje Y
+
+# Títulos y etiquetas
+#plt.title(
+    #'Distribución Porcentual por Área OCDE', fontsize=14, fontweight='bold', pad=15
+#)
+plt.xlabel('Cantidad', fontsize=16)
+plt.ylabel('Área OCDE', fontsize=16)
+
+# Ajuste de límites para dejar espacio a las etiquetas del %
+plt.xlim(0, max(distribucion_maestria['Cantidad']) * 1.15)
+plt.tight_layout()
+
+# Mostrar gráfico
+plt.show()
+
+
+###############################################################################
+# Considerando la edad de los becarios de programas de maestria de los dos
+# últimos años (2024, 2025)
+###############################################################################
+
+# Se elabora un analísis descriptivo de la variable edadbases
+df_2024_2025["EDADBASES"].describe()
+
+
+# 1. Crear los rangos de edad
+bins = [19, 39, 55]
+labels = ["20 - 39 años", "40 - 55 años"]
+
+df_2024_2025["RANGO_EDAD"] = pd.cut(
+    df_2024_2025["EDADBASES"], bins=bins, labels=labels, right=True
+)
+
+# 2. Calcular porcentajes por cada rango de edad
+df_grouped = (
+    df_2024_2025.groupby(['RANGO_EDAD', 'AREA_OCDE'], observed=False)
+    .size()
+    .unstack(fill_value=0)
+)
+df_pct = df_grouped.div(df_grouped.sum(axis=1), axis=0) * 100
+df_plot = df_pct.reset_index().melt(
+    id_vars='RANGO_EDAD', var_name='AREA_OCDE', value_name='Porcentaje'
+)
+
+
+# Configuración de fondo
+plt.figure(figsize=(14, 6))
+sns.set_theme(style='whitegrid')
+
+# Uso de paleta cualitativa 'Set2' para máxima distinción visual
+ax = sns.barplot(
+    data=df_plot,
+    x='RANGO_EDAD',
+    y='Porcentaje',
+    hue='AREA_OCDE',
+    palette='Set2',  # O 'tab10', 'Paired', 'Set1'
+)
+
+# Etiquetas de valores sobre cada barra
+for p in ax.patches:
+    height = p.get_height()
+    if height > 0:
+        ax.annotate(
+            f'{height:.1f}%',
+            (p.get_x() + p.get_width() / 2.0, height),
+            ha='center',
+            va='bottom',
+            xytext=(0, 3),
+            textcoords='offset points',
+            fontsize=11,
+            fontweight='bold',
+        )
+
+# Formato de títulos y ejes
+ax.set_xlabel('Rango de Edad', fontsize=12, fontweight='bold', labelpad=10)
+ax.set_ylabel(
+    'Porcentaje (%) por Área OCDE', fontsize=12, fontweight='bold', labelpad=10
+)
+
+
+plt.legend(
+    title='Área OCDE',
+    loc='upper center',
+    bbox_to_anchor=(0.5, -0.15),
+    ncol=3,               # Distribuye los elementos en 3 columnas
+    fontsize=8.5,
+    title_fontsize=9.5,
+    frameon=True
+)
+
+###############################################################################
+# Considerando el género de los becarios de programas de maestría de 
+# los dos últimos años (2024, 2025)
+###############################################################################
+
+# 1. Calcular porcentajes agrupando por la columna SEXO
+df_grouped_sex = (
+    df_2024_2025.groupby(['SEXO', 'AREA_OCDE'], observed=False)
+    .size()
+    .unstack(fill_value=0)
+)
+df_pct_sex = df_grouped_sex
+df_plot_sex = df_pct_sex.reset_index().melt(
+    id_vars='SEXO', var_name='AREA_OCDE', value_name='Porcentaje'
+)
+
+# 2. Configurar figura y tema
+plt.figure(figsize=(10, 6))
+sns.set_theme(style='whitegrid')
+
+# 3. Dibujar barras con paleta cualitativa
+ax = sns.barplot(
+    data=df_plot_sex,
+    x='SEXO',
+    y='Porcentaje',
+    hue='AREA_OCDE',
+    palette='Set2',
+)
+
+# 4. Agregar etiquetas de porcentaje sobre cada barra
+for p in ax.patches:
+    height = p.get_height()
+    if height > 0:
+        ax.annotate(
+            f'{height:.0f}',
+            (p.get_x() + p.get_width() / 2.0, height),
+            ha='center',
+            va='bottom',
+            xytext=(0, 3),
+            textcoords='offset points',
+            fontsize=11,
+            fontweight='bold',
+        )
+
+# 5. Formato de ejes y leyenda compacta
+ax.set_xlabel('Género', fontsize=12, fontweight='bold', labelpad=10)
+ax.set_ylabel(
+    'Número por Área OCDE', fontsize=12, fontweight='bold', labelpad=10
+)
+
+plt.legend(
+    title='Área OCDE',
+    bbox_to_anchor=(1.02, 1),
+    loc='upper left',
+    fontsize=8,
+    title_fontsize=9,
+    labelspacing=0.35,
+    handletextpad=0.4,
+    borderpad=0.4,
+)
+
+plt.ylim(0, max(df_plot_sex['Porcentaje']) * 1.18)
+plt.tight_layout()
+
+plt.show()
+
+
+###############################################################################
+###############################################################################
+# SE REALIZA UN ANÁLISIS PARA LOS POSTULANTES QUE NO OBTUVIERON LA BECA DE DOCTORADO
+###############################################################################
+###############################################################################
+
+# Considero a los postulantes que no obtuvieron la beca
+beca_no_doctorado = postulante_doctorado_excel[postulante_doctorado_excel["CONDICION_FINAL"]=="NO SE LE ADJUDICÓ LA BECA"]
+beca_no_doctorado = beca_no_doctorado[["AÑO_CONVOCATORIA", "SEXO", "EDADBASES", "NOMBRECARRERA", "AREA_OCDE"]]
+
+
+# Se calcula una distribución historica
+distribucion_maestria = beca_no_doctorado.AREA_OCDE.value_counts(normalize=True).round(2)*100
+distribucion_maestria = distribucion_maestria.to_frame()
+distribucion_maestria.reset_index(inplace=True)
+distribucion_maestria.rename(columns=({"proportion":"Porcentaje"}), inplace=True)
+
+
+# Configuración del estilo de la figura
+plt.figure(figsize=(12, 6))
+sns.set_theme(style='whitegrid')
+
+# Creación del gráfico de barras horizontales
+ax = sns.barplot(
+    data=distribucion_maestria,
+    x='Porcentaje',
+    y='AREA_OCDE',
+    palette='magma',  # Paleta de colores similar a la de tu imagen
+)
+
+# Añadir los valores percentuales al final de cada barra
+for p in ax.patches:
+    width = p.get_width()
+    ax.annotate(
+        f'{width:.0f}%',
+        (width, p.get_y() + p.get_height() / 2.0),
+        ha='left',
+        va='center',
+        xytext=(5, 0),
+        textcoords='offset points',
+        fontsize=16,
+        fontweight='bold',
+    )
+
+
+ax.tick_params(axis='x', labelsize=14, labelcolor='black')  # Valores del eje X
+ax.tick_params(
+    axis='y', labelsize=14, labelcolor='#222222'
+)  # Categorías del eje Y
+
+# Títulos y etiquetas
+#plt.title(
+    #'Distribución Porcentual por Área OCDE', fontsize=14, fontweight='bold', pad=15
+#)
+plt.xlabel('Porcentaje', fontsize=16)
+plt.ylabel('Área OCDE', fontsize=16)
+
+# Ajuste de límites para dejar espacio a las etiquetas del %
+plt.xlim(0, max(distribucion_maestria['Porcentaje']) * 1.15)
+plt.tight_layout()
+
+# Mostrar gráfico
+plt.show()
+
+
+###############################################################################
+# Considerando la edad de los becarios de programas de maestria
+###############################################################################
+
+# 1. Crear los rangos de edad
+bins = [23, 33, 42, 100]
+labels = ['23 - 33 años', '33 - 42 años', '42 - 55 años']
+beca_no_doctorado['RANGO_EDAD'] = pd.cut(
+    beca_no_doctorado['EDADBASES'], bins=bins, labels=labels, right=True
+)
+
+# 2. Calcular porcentajes por cada rango de edad
+df_grouped = (
+    beca_no_doctorado.groupby(['RANGO_EDAD', 'AREA_OCDE'], observed=False)
+    .size()
+    .unstack(fill_value=0)
+)
+df_pct = df_grouped.div(df_grouped.sum(axis=1), axis=0) * 100
+df_plot = df_pct.reset_index().melt(
+    id_vars='RANGO_EDAD', var_name='AREA_OCDE', value_name='Porcentaje'
+)
+
+
+# Configuración de fondo
+plt.figure(figsize=(14, 6))
+sns.set_theme(style='whitegrid')
+
+# Uso de paleta cualitativa 'Set2' para máxima distinción visual
+ax = sns.barplot(
+    data=df_plot,
+    x='RANGO_EDAD',
+    y='Porcentaje',
+    hue='AREA_OCDE',
+    palette='Set2',  # O 'tab10', 'Paired', 'Set1'
+)
+
+# Etiquetas de valores sobre cada barra
+for p in ax.patches:
+    height = p.get_height()
+    if height > 0:
+        ax.annotate(
+            f'{height:.1f}%',
+            (p.get_x() + p.get_width() / 2.0, height),
+            ha='center',
+            va='bottom',
+            xytext=(0, 3),
+            textcoords='offset points',
+            fontsize=11,
+            fontweight='bold',
+        )
+
+# Formato de títulos y ejes
+ax.set_xlabel('Rango de Edad', fontsize=12, fontweight='bold', labelpad=10)
+ax.set_ylabel(
+    'Porcentaje (%) por Área OCDE', fontsize=12, fontweight='bold', labelpad=10
+)
+
+
+plt.legend(
+    title='Área OCDE',
+    loc='upper center',
+    bbox_to_anchor=(0.5, -0.15),
+    ncol=3,               # Distribuye los elementos en 3 columnas
+    fontsize=8.5,
+    title_fontsize=9.5,
+    frameon=True
+)
+
+###############################################################################
+# Considerando el género de los becarios de programas de maestría
+###############################################################################
+
+# 1. Calcular porcentajes agrupando por la columna SEXO
+df_grouped_sex = (
+    beca_no_doctorado.groupby(['SEXO', 'AREA_OCDE'], observed=False)
+    .size()
+    .unstack(fill_value=0)
+)
+df_pct_sex = df_grouped_sex.div(df_grouped_sex.sum(axis=1), axis=0) * 100
+df_plot_sex = df_pct_sex.reset_index().melt(
+    id_vars='SEXO', var_name='AREA_OCDE', value_name='Porcentaje'
+)
+
+# 2. Configurar figura y tema
+plt.figure(figsize=(10, 6))
+sns.set_theme(style='whitegrid')
+
+# 3. Dibujar barras con paleta cualitativa
+ax = sns.barplot(
+    data=df_plot_sex,
+    x='SEXO',
+    y='Porcentaje',
+    hue='AREA_OCDE',
+    palette='Set2',
+)
+
+# 4. Agregar etiquetas de porcentaje sobre cada barra
+for p in ax.patches:
+    height = p.get_height()
+    if height > 0:
+        ax.annotate(
+            f'{height:.1f}%',
+            (p.get_x() + p.get_width() / 2.0, height),
+            ha='center',
+            va='bottom',
+            xytext=(0, 3),
+            textcoords='offset points',
+            fontsize=11,
+            fontweight='bold',
+        )
+
+# 5. Formato de ejes y leyenda compacta
+ax.set_xlabel('Género', fontsize=12, fontweight='bold', labelpad=10)
+ax.set_ylabel(
+    'Porcentaje (%) por Área OCDE', fontsize=12, fontweight='bold', labelpad=10
+)
+
+plt.legend(
+    title='Área OCDE',
+    bbox_to_anchor=(1.02, 1),
+    loc='upper left',
+    fontsize=8,
+    title_fontsize=9,
+    labelspacing=0.35,
+    handletextpad=0.4,
+    borderpad=0.4,
+)
+
+plt.ylim(0, max(df_plot_sex['Porcentaje']) * 1.18)
+plt.tight_layout()
+
+plt.show()
+
+
+postulante_doctorado.CONDICION_FINAL.value_counts()
+
+
+
+
+
